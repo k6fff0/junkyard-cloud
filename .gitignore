@@ -2,3 +2,5 @@
 /HANDOVER.md
 /INVENTORY.md
 /_work/
+__pycache__/
+*.pyc
