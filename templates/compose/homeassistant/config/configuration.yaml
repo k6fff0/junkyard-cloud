@@ -1,0 +1,8 @@
+# Loads the default integrations. The http block must be here before the first start (see compose.yml).
+default_config:
+
+http:
+  use_x_forwarded_for: true
+  trusted_proxies:
+    - 127.0.0.1
+    - ::1

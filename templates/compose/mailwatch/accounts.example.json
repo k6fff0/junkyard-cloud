@@ -1,0 +1,4 @@
+[
+  {"name": "me@example.com", "host": "imap.gmail.com", "user": "me@example.com", "password": "app password here"},
+  {"name": "work@example.org", "host": "mail.example.org", "port": 993, "user": "work@example.org", "password": "..."}
+]

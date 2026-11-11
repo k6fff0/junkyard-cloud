@@ -1,0 +1,28 @@
+# The dashboard. home.DOMAIN -> 127.0.0.1:3001 behind Access. "status" serves the backup status JSON files to the
+# dashboard's cards (read only, numbers and dates, never names or secrets).
+name: homepage
+services:
+  homepage:
+    image: ghcr.io/gethomepage/homepage:v1.12.3
+    container_name: homepage
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3001:3000"
+    environment:
+      HOMEPAGE_ALLOWED_HOSTS: home.${DOMAIN},127.0.0.1:3001,localhost:3001
+    volumes:
+      - ./config:/app/config
+      - /mnt/storage:/mnt/storage:ro      # only to show the big disk's free space
+  status:
+    image: nginxinc/nginx-unprivileged:1.27-alpine
+    container_name: homepage-status
+    restart: unless-stopped
+    ports:
+      - "172.17.0.1:8091:8080"
+    volumes:
+      - ${STATUS_DIR}:/usr/share/nginx/html:ro
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 32m

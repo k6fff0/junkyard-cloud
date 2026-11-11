@@ -1,0 +1,16 @@
+title: Home server
+language: en
+theme: dark
+color: slate
+headerStyle: clean
+hideVersion: true
+layout:
+  Apps:
+    style: row
+    columns: 4
+  Backups:
+    style: row
+    columns: 3
+  Server health:
+    style: row
+    columns: 3

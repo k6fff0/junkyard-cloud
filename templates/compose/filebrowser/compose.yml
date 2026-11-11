@@ -1,0 +1,16 @@
+# Files in the browser. files.DOMAIN -> 127.0.0.1:8080 behind Access. Runs as the owner's user (not root) and
+# sees only FILES_ROOT, never / or /etc.
+name: filebrowser
+services:
+  filebrowser:
+    image: filebrowser/filebrowser:v2.63.18
+    container_name: filebrowser
+    restart: unless-stopped
+    user: "${PUID}:${PGID}"
+    ports:
+      - "127.0.0.1:8080:80"
+    volumes:
+      - ${FILES_ROOT}:/srv
+      - ./database:/database
+      - ./config:/config
+    security_opt: ["no-new-privileges:true"]

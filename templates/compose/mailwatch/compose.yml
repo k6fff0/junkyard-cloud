@@ -1,0 +1,34 @@
+# Watches the owner's inboxes (read only) and hands new mail to n8n. It holds mailbox passwords and reads mail
+# from strangers: isolated, internet and n8n only (jc-isolate mailwatch: GATEWAY=172.17.0.1, ALLOW_HOST="any:5678").
+name: mailwatch
+services:
+  mailwatch:
+    image: python:3.14.10-slim
+    container_name: mailwatch
+    restart: unless-stopped
+    user: "10001:10001"
+    command: ["python", "-u", "/app/mailwatch.py"]
+    environment:
+      N8N_URL: http://172.17.0.1:5678/webhook/mail-in
+      ACCOUNTS_FILE: /run/mailwatch/accounts.json
+      DATA_DIR: /data
+    env_file: .env
+    volumes:
+      - ${JC_SRC:-/opt/junkyard/src}/components/mailwatch/mailwatch.py:/app/mailwatch.py:ro
+      - ./accounts.json:/run/mailwatch/accounts.json:ro    # mode 400, owned by 10001
+      - ./data:/data
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 256m
+    networks: [mailwatch]
+networks:
+  mailwatch:
+    name: mailwatch
+    driver_opts:
+      com.docker.network.bridge.name: br-mailwatch
+    ipam:
+      config:
+        - subnet: 172.30.111.0/24
+          gateway: 172.30.111.1

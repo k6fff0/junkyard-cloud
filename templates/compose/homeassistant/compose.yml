@@ -1,0 +1,16 @@
+# Smart home. Host network (device discovery). ha.DOMAIN -> 127.0.0.1:8123 behind Access; ufw allows 8123 from
+# the LAN only. Before the FIRST start, put config/configuration.yaml in place (trusted proxies): later changes to
+# http: settings are kept in .storage and need the steps in references/lessons.md.
+name: homeassistant
+services:
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:2026.10.4
+    container_name: homeassistant
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ}
+    volumes:
+      - ./config:/config
+      - /etc/localtime:/etc/localtime:ro
+      - /run/dbus:/run/dbus:ro

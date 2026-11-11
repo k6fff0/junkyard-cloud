@@ -1,0 +1,65 @@
+# One entry per installed service. href = the public address; siteMonitor = the internal one (references/network.md).
+- Apps:
+    - Assistant (n8n):
+        href: https://n8n.example.com
+        siteMonitor: http://172.17.0.1:5678/healthz
+        icon: n8n.png
+    - Photos:
+        href: https://photos.example.com
+        siteMonitor: http://172.17.0.1:2283
+        icon: immich.png
+    - Documents:
+        href: https://docs.example.com
+        siteMonitor: http://172.17.0.1:8010
+        icon: paperless-ngx.png
+- Backups:
+    - Nightly:
+        icon: mdi-backup-restore
+        widget:
+          type: customapi
+          url: http://172.17.0.1:8091/nightly.json
+          refreshInterval: 300000
+          mappings:
+            - field: status
+              label: Status
+            - field: finished
+              label: Finished
+              format: relativeDate
+            - field: size
+              label: Size
+    - System disk image:
+        icon: mdi-harddisk
+        widget:
+          type: customapi
+          url: http://172.17.0.1:8091/snapshot.json
+          refreshInterval: 300000
+          mappings:
+            - field: status
+              label: Status
+            - field: finished
+              label: Finished
+              format: relativeDate
+            - field: size
+              label: Size
+    - Off-site (R2):
+        icon: mdi-cloud-upload
+        widget:
+          type: customapi
+          url: http://172.17.0.1:8091/offsite.json
+          refreshInterval: 300000
+          mappings:
+            - field: status
+              label: Status
+            - field: finished
+              label: Finished
+              format: relativeDate
+            - field: snapshots
+              label: Snapshots
+- Server health:
+    - System:
+        widget:
+          type: resources
+          cpu: true
+          memory: true
+          disk: [/, /mnt/storage]
+          uptime: true

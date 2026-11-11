@@ -1,0 +1,32 @@
+# Media. media.DOMAIN -> 127.0.0.1:8096, NOT behind Access (TV apps): its own login, lockout, a country rule.
+# Isolated network: internet only (posters, titles), never the LAN (jc-isolate jellyfin).
+name: jellyfin
+services:
+  jellyfin:
+    image: jellyfin/jellyfin:12.4.20261026-211555
+    container_name: jellyfin
+    restart: unless-stopped
+    user: "10003:10003"
+    environment:
+      TZ: ${TZ}
+      JELLYFIN_PublishedServerUrl: https://media.${DOMAIN}
+    volumes:
+      - ./config:/config
+      - ${CACHE_DIR}:/cache               # transcoding needs room: the big disk
+      - ${DOWNLOADS_DIR}:/media:ro
+    ports:
+      - "127.0.0.1:8096:8096"
+      - "172.17.0.1:8096:8096"            # the dashboard's status dot
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 3g
+    networks: [jellyfin]
+networks:
+  jellyfin:
+    name: jellyfin
+    driver_opts:
+      com.docker.network.bridge.name: br-jellyfin
+    ipam:
+      config:
+        - subnet: 172.30.114.0/24
+          gateway: 172.30.114.1

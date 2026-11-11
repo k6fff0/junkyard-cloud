@@ -1,0 +1,49 @@
+# Photos. photos.DOMAIN -> 127.0.0.1:2283 behind Access (phone app: service token headers).
+# Based on Immich's release compose for v3.2.4; when updating, take the new release's compose and keep the port
+# binding on 127.0.0.1. Read the release notes first: the database image is tied to the version.
+name: immich
+services:
+  immich-server:
+    container_name: immich_server
+    image: ghcr.io/immich-app/immich-server:${IMMICH_VERSION}
+    volumes:
+      - ${UPLOAD_LOCATION}:/data
+      - /etc/localtime:/etc/localtime:ro
+    env_file: .env
+    ports:
+      - "127.0.0.1:2283:2283"
+    depends_on: [redis, database]
+    restart: always
+    healthcheck:
+      disable: false
+  immich-machine-learning:
+    container_name: immich_machine_learning
+    image: ghcr.io/immich-app/immich-machine-learning:${IMMICH_VERSION}
+    volumes:
+      - model-cache:/cache
+    env_file: .env
+    restart: always
+    healthcheck:
+      disable: false
+  redis:
+    container_name: immich_redis
+    image: docker.io/valkey/valkey:9
+    healthcheck:
+      test: redis-cli ping | grep -q PONG || exit 1
+    restart: always
+  database:
+    container_name: immich_postgres
+    image: ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0@sha256:bcf63357191b76a916ae5eb93464d65c07511da41e3bf7a8416db519b40b1c23
+    environment:
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_USER: ${DB_USERNAME}
+      POSTGRES_DB: ${DB_DATABASE_NAME}
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    volumes:
+      - ${DB_DATA_LOCATION}:/var/lib/postgresql/data
+    shm_size: 128mb
+    restart: always
+    healthcheck:
+      disable: false
+volumes:
+  model-cache:

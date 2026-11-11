@@ -1,0 +1,50 @@
+# Saved links. links.DOMAIN -> 127.0.0.1:3010 behind Access (phone app: service token headers).
+# It opens every saved link, so it is isolated: internet only (jc-isolate karakeep). n8n: http://172.17.0.1:3010.
+name: karakeep
+services:
+  web:
+    image: ghcr.io/karakeep-app/karakeep:0.34.1
+    restart: unless-stopped
+    volumes:
+      - ./data:/data
+    ports:
+      - "127.0.0.1:3010:3000"
+      - "172.17.0.1:3010:3000"
+    env_file: .env
+    environment:
+      MEILI_ADDR: http://meilisearch:7700
+      BROWSER_WEB_URL: http://chrome:9222
+      DATA_DIR: /data
+    mem_limit: 1536m
+    networks: [karakeep]
+  chrome:
+    image: ghcr.io/karakeep-app/karakeep-chrome:156.0.8078.47-r1
+    restart: unless-stopped
+    init: true
+    command:
+      - --disable-gpu
+      - --disable-dev-shm-usage
+      - --hide-scrollbars
+      - --disable-blink-features=AutomationControlled
+      - --window-size=1440,900
+    mem_limit: 1g
+    networks: [karakeep]
+  meilisearch:
+    image: getmeili/meilisearch:v1.41.0
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      MEILI_NO_ANALYTICS: "true"
+    volumes:
+      - ./meili:/meili_data
+    mem_limit: 512m
+    networks: [karakeep]
+networks:
+  karakeep:
+    name: karakeep
+    driver_opts:
+      com.docker.network.bridge.name: br-karakeep
+    ipam:
+      config:
+        - subnet: 172.30.112.0/24
+          gateway: 172.30.112.1

@@ -1,0 +1,72 @@
+# Downloads: aria2 (files, torrents, magnets), the AriaNg panel, and the bridge (n8n, yt-dlp, messages).
+# Isolated network: internet only; the bridge (172.30.113.10) may also call n8n on 172.17.0.1:5678.
+# Run ./setup.sh once (AriaNg, checked by SHA-256, with its RPC settings filled in).
+name: downloads
+services:
+  aria2:
+    build: ${JC_SRC:-/opt/junkyard/src}/components/dlbridge/aria2
+    image: junkyard/aria2:1
+    container_name: dl-aria2
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ${DOWNLOADS_DIR}:/downloads
+      - ./data/aria2:/data
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 512m
+    networks:
+      downloads: {ipv4_address: 172.30.113.2}
+
+  web:
+    image: nginxinc/nginx-unprivileged:1.27-alpine
+    container_name: dl-web
+    restart: unless-stopped
+    depends_on: [aria2]
+    volumes:
+      - ${JC_SRC:-/opt/junkyard/src}/components/dlbridge/web/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./web/ariang:/usr/share/nginx/html:ro
+    tmpfs: [/tmp]
+    ports:
+      - "127.0.0.1:8102:8080"    # download.DOMAIN, behind Access
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 64m
+    networks:
+      downloads: {ipv4_address: 172.30.113.3}
+
+  bridge:
+    build: ${JC_SRC:-/opt/junkyard/src}/components/dlbridge
+    image: junkyard/dlbridge:1
+    container_name: dl-bridge
+    restart: unless-stopped
+    depends_on: [aria2]
+    env_file: .env
+    environment:
+      ARIA2_URL: http://aria2:6800/jsonrpc
+      NOTIFY_URL: http://172.17.0.1:5678/webhook/notify
+      TZ: ${TZ}
+    volumes:
+      - ${DOWNLOADS_DIR}:/downloads
+      - ./data/bridge:/data
+    tmpfs: ["/tmp:size=512m"]
+    ports:
+      - "172.17.0.1:8103:8790"   # n8n (assistant tools) and the dashboard card (/status, numbers only)
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 1g
+    networks:
+      downloads: {ipv4_address: 172.30.113.10}
+
+networks:
+  downloads:
+    name: downloads
+    driver_opts:
+      com.docker.network.bridge.name: br-downloads
+    ipam:
+      config:
+        - subnet: 172.30.113.0/24
+          gateway: 172.30.113.1

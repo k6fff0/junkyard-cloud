@@ -1,0 +1,71 @@
+# Documents archive. docs.DOMAIN -> 127.0.0.1:8010 behind Access. On the assistant network as "paperless".
+# Files on the big disk; its database is found and dumped by the nightly backup.
+name: paperless
+services:
+  broker:
+    image: docker.io/valkey/valkey:9-alpine
+    container_name: paperless_broker
+    restart: unless-stopped
+    volumes:
+      - ./redis:/data
+  db:
+    image: docker.io/library/postgres:18
+    container_name: paperless_db
+    restart: unless-stopped
+    volumes:
+      - ./postgres:/var/lib/postgresql
+    environment:
+      POSTGRES_DB: paperless
+      POSTGRES_USER: paperless
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+  webserver:
+    image: ghcr.io/paperless-ngx/paperless-ngx:3.3.3
+    container_name: paperless
+    restart: unless-stopped
+    depends_on: [db, broker, gotenberg, tika]
+    ports:
+      - "127.0.0.1:8010:8000"
+      - "172.17.0.1:8010:8000"   # the dashboard's status dot
+    volumes:
+      - ./data:/usr/src/paperless/data
+      - ${PAPERLESS_DIR}/media:/usr/src/paperless/media
+      - ${PAPERLESS_DIR}/export:/usr/src/paperless/export
+      - ${PAPERLESS_DIR}/consume:/usr/src/paperless/consume
+    environment:
+      PAPERLESS_REDIS: redis://broker:6379
+      PAPERLESS_DBHOST: db
+      PAPERLESS_DBENGINE: postgresql
+      PAPERLESS_DBPASS: ${POSTGRES_PASSWORD}
+      PAPERLESS_SECRET_KEY: ${SECRET_KEY}
+      PAPERLESS_ADMIN_USER: ${ADMIN_USER}
+      PAPERLESS_ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      PAPERLESS_ADMIN_MAIL: ${ADMIN_MAIL}
+      PAPERLESS_TIKA_ENABLED: 1
+      PAPERLESS_TIKA_GOTENBERG_ENDPOINT: http://gotenberg:3000
+      PAPERLESS_TIKA_ENDPOINT: http://tika:9998
+      PAPERLESS_URL: https://docs.${DOMAIN}
+      PAPERLESS_ALLOWED_HOSTS: docs.${DOMAIN},localhost,127.0.0.1,paperless
+      PAPERLESS_TIME_ZONE: ${TZ}
+      PAPERLESS_DATE_ORDER: ${DATE_ORDER}
+      PAPERLESS_OCR_LANGUAGES: ${OCR_INSTALL}
+      PAPERLESS_OCR_LANGUAGE: ${OCR_LANGUAGE}
+      PAPERLESS_TASK_WORKERS: 1
+      PAPERLESS_THREADS_PER_WORKER: 2
+      PAPERLESS_WEBSERVER_WORKERS: 2
+      PAPERLESS_FILENAME_FORMAT: "{{ created_year }}/{{ document_type }}/{{ title }}"
+    networks:
+      default: {}
+      assistant:
+        aliases: [paperless]
+  gotenberg:
+    image: docker.io/gotenberg/gotenberg:8.37
+    container_name: paperless_gotenberg
+    restart: unless-stopped
+    command: ["gotenberg", "--chromium-disable-javascript=true", "--chromium-allow-list=^file:///tmp/.*"]
+  tika:
+    image: docker.io/apache/tika:3.3.1.0
+    container_name: paperless_tika
+    restart: unless-stopped
+networks:
+  assistant:
+    external: true

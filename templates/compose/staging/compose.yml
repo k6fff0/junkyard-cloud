@@ -1,0 +1,25 @@
+# Pattern for one of the owner's projects: copy to /opt/junkyard/staging/<project>, put the app in ./app.
+# <project>.DOMAIN -> 127.0.0.1:${APP_PORT} behind Access (public only with the owner's yes).
+# Its database is found and dumped by the nightly backup like any other.
+name: ${PROJECT}
+services:
+  app:
+    build: ./app
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "127.0.0.1:${APP_PORT}:${APP_INTERNAL_PORT}"
+    depends_on: [db]
+    networks: [project]
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${PROJECT}
+      POSTGRES_USER: ${PROJECT}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - ./postgres:/var/lib/postgresql/data
+    networks: [project]
+networks:
+  project: {}

@@ -1,0 +1,20 @@
+# Phone calls with the assistant (Twilio <-> OpenAI Realtime). Public at voice.DOMAIN WITHOUT Access (Twilio
+# must reach it); the long secret in the path is the protection. See references/assistant.md, calls.
+name: voice
+services:
+  voice:
+    build: ${JC_SRC:-/opt/junkyard/src}/components/voice-bridge
+    image: junkyard/voice-bridge:1
+    container_name: voice-bridge
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "127.0.0.1:8765:8765"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 256m
+    networks: [assistant]
+networks:
+  assistant:
+    external: true

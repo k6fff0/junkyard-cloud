@@ -1,0 +1,47 @@
+# Web search (SearXNG) and page reading (Chromium) for the assistant. Isolated: internet only
+# (jc-isolate webtool). n8n reaches it at http://172.17.0.1:8787.
+name: webtool
+services:
+  searxng:
+    image: searxng/searxng:2026.9.30-a9d990033
+    container_name: webtool-searxng
+    restart: unless-stopped
+    environment:
+      SEARXNG_BASE_URL: http://searxng:8080/
+    volumes:
+      - ./searxng:/etc/searxng
+    dns: [1.1.1.1, 9.9.9.9]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 512m
+    networks: [webtool]
+  webtool:
+    build: ${JC_SRC:-/opt/junkyard/src}/components/webtool/app
+    image: junkyard/webtool:1
+    container_name: webtool
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      SEARX_URL: http://searxng:8080
+    ports:
+      - "172.17.0.1:8787:8787"
+    volumes:
+      - ./data:/data            # owned by uid 10001
+    dns: [1.1.1.1, 9.9.9.9]
+    read_only: true
+    tmpfs: ["/tmp:size=512m"]
+    shm_size: 512m
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 1536m
+    pids_limit: 512
+    depends_on: [searxng]
+    networks: [webtool]
+networks:
+  webtool:
+    name: webtool
+    driver_opts:
+      com.docker.network.bridge.name: br-webtool
+    ipam:
+      config:
+        - subnet: 172.30.110.0/24
+          gateway: 172.30.110.1

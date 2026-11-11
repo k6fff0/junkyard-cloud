@@ -1,0 +1,30 @@
+# File tools (PDF, Office, images). pdf.DOMAIN -> 127.0.0.1:8085 behind Access; the file bridge reaches it as
+# "stirling" on the assistant network. No login: never publish it without Access.
+name: stirling
+services:
+  stirling-pdf:
+    image: stirlingtools/stirling-pdf:3.2.1
+    container_name: stirling-pdf
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8085:8080"
+    environment:
+      DISABLE_ADDITIONAL_FEATURES: "true"
+      SECURITY_ENABLELOGIN: "false"
+      SYSTEM_DEFAULTLOCALE: en-US
+      SYSTEM_MAXFILESIZE: "200"
+      SYSTEM_ENABLEANALYTICS: "false"
+      SYSTEM_GOOGLEVISIBILITY: "false"
+      SHOW_SURVEY: "false"
+      METRICS_ENABLED: "false"
+      TZ: ${TZ}
+    volumes:
+      - ./config:/configs
+      - ./logs:/logs
+    mem_limit: 2g
+    networks:
+      assistant:
+        aliases: [stirling]
+networks:
+  assistant:
+    external: true

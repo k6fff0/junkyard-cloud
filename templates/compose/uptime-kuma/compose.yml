@@ -1,0 +1,15 @@
+# Monitoring. uptime.DOMAIN -> 127.0.0.1:3002 behind Access. Host network so it can check the LAN and the server.
+name: uptime-kuma
+services:
+  uptime-kuma:
+    image: louislam/uptime-kuma:2.5.6-slim
+    container_name: uptime-kuma
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      UPTIME_KUMA_HOST: 127.0.0.1
+      UPTIME_KUMA_PORT: "3002"
+      UPTIME_KUMA_DB_TYPE: sqlite
+      TZ: ${TZ}
+    volumes:
+      - ./data:/app/data
