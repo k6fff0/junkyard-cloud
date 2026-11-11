@@ -1,0 +1,12 @@
+[Unit]
+Description=Junkyard Cloud: limit the %i containers to the internet
+After=docker.service
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/jc-isolate %i
+
+[Install]
+WantedBy=multi-user.target docker.service
