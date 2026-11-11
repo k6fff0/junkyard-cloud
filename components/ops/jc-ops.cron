@@ -1,0 +1,2 @@
+# jc-ops: send due reminders every minute
+* * * * * root /usr/local/sbin/jc-ops fire-reminders

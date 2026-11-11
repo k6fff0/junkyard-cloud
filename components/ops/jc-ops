@@ -1,0 +1,255 @@
+#!/usr/bin/env python3
+"""jc-ops: the fixed set of actions the assistant (n8n) may run on this server, plus reminders.
+
+n8n calls it over SSH with a forced command ("jc-ops ssh" in authorized_keys, with restrict and from=),
+so the caller can only pick one of the actions below; it can never run an arbitrary command.
+Cron runs "jc-ops fire-reminders" every minute.
+
+Settings: /etc/junkyard/ops.json (JC_OPS_CONFIG), see ops.example.json.
+"""
+import base64
+import datetime
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import urllib.request
+
+CONFIG = os.environ.get("JC_OPS_CONFIG", "/etc/junkyard/ops.json")
+STATE_DIR = os.environ.get("JC_OPS_STATE", "/var/lib/jc-ops")
+LOG = os.environ.get("JC_OPS_LOG", "/var/log/jc-ops.log")
+REMINDERS = os.path.join(STATE_DIR, "reminders.json")
+CHANNELS = ["telegram", "email", "whatsapp", "call", "ai_call"]
+REPEATS = {"none": None, "daily": datetime.timedelta(days=1), "weekly": datetime.timedelta(weeks=1)}
+TITLES = {"en": "⏰ Reminder", "ar": "⏰ تذكير"}
+SAFE_ARG = re.compile(r"[A-Za-z0-9_:+=/.\-]+")
+
+
+def config():
+    with open(CONFIG, encoding="utf-8") as f:
+        c = json.load(f)
+    c.setdefault("restartable", [])
+    c.setdefault("disks", {"system": "/"})
+    c.setdefault("status_files", {})
+    c.setdefault("default_channels", ["whatsapp"])
+    c.setdefault("lang", "en")
+    c.setdefault("notify_url", "http://127.0.0.1:5678/webhook/notify")
+    c.setdefault("notify_secret_file", "/etc/junkyard/notify-secret")
+    return c
+
+
+def log(msg):
+    with open(LOG, "a", encoding="utf-8") as f:
+        f.write("%s %s\n" % (datetime.datetime.now().isoformat(timespec="seconds"), msg))
+
+
+def run(args, timeout=60):
+    """No shell: every command is a fixed list."""
+    try:
+        return subprocess.run(args, capture_output=True, text=True, timeout=timeout).stdout.strip()
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return "unavailable (%s)" % type(e).__name__
+
+
+def gb(n):
+    return "%.1f GB" % (n / 1e9)
+
+
+def load():
+    try:
+        with open(REMINDERS, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {"next_id": 1, "items": []}
+
+
+def save(d):
+    os.makedirs(STATE_DIR, exist_ok=True)
+    tmp = REMINDERS + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(d, f, ensure_ascii=False, indent=1)
+    os.replace(tmp, REMINDERS)
+
+
+# ---------------------------------------------------------------- server
+def status(c):
+    now = datetime.datetime.now().astimezone()
+    print("time:", now.strftime("%Y-%m-%d %H:%M %Z"), "| uptime:", run(["uptime", "-p"]))
+    try:
+        with open("/proc/loadavg") as f:
+            print("load:", " ".join(f.read().split()[:3]))
+        with open("/proc/meminfo") as f:
+            mem = {k: int(v.split()[0]) * 1024 for k, v in (line.split(":", 1) for line in f)}
+        print("memory: %s available of %s" % (gb(mem["MemAvailable"]), gb(mem["MemTotal"])))
+    except OSError:
+        pass
+    for label, path in c["disks"].items():
+        try:
+            u = shutil.disk_usage(path)
+            print("disk %s (%s): %s used of %s (%d%%), %s free" % (
+                label, path, gb(u.used), gb(u.total), round(u.used * 100 / u.total), gb(u.free)))
+        except OSError:
+            print("disk %s (%s): not mounted" % (label, path))
+    print("cloudflare tunnel:", run(["systemctl", "is-active", "cloudflared"]))
+    print("containers:")
+    print(run(["docker", "ps", "-a", "--format", "  {{.Names}}: {{.Status}}"]))
+    for label, path in c["status_files"].items():
+        try:
+            with open(path, encoding="utf-8") as f:
+                print("backup %s: %s" % (label, f.read().strip()[:300]))
+        except OSError:
+            print("backup %s: no status file" % label)
+
+
+def restart(c, name):
+    if name not in c["restartable"]:
+        print("REFUSED: '%s' is not in the allowed list: %s" % (name, ", ".join(c["restartable"]) or "(empty)"))
+        return
+    log("restart " + name)
+    r = subprocess.run(["docker", "restart", name], capture_output=True, text=True, timeout=120)
+    print("restarted" if r.returncode == 0 else "FAILED: " + r.stderr.strip())
+    print(run(["docker", "ps", "--filter", "name=^%s$" % name, "--format", "{{.Names}}: {{.Status}}"]))
+
+
+# ---------------------------------------------------------------- reminders
+def remind_add(c, when, b64):
+    """b64 is either plain text, or JSON {"text", "channels", "repeat"}. Times are the server's local time."""
+    try:
+        t = datetime.datetime.fromisoformat(when)
+        raw = base64.b64decode(b64, validate=True).decode("utf-8").strip()
+    except Exception:
+        print("ERROR: bad time or text. time must look like 2026-10-11T20:00 (server local time)")
+        return
+    spec = {"text": raw}
+    if raw.startswith("{"):
+        try:
+            spec = json.loads(raw)
+        except ValueError:
+            pass
+    text = str(spec.get("text") or "").strip()
+    chans = spec.get("channels") or []
+    if isinstance(chans, str):
+        chans = re.split(r"[\s,]+", chans)
+    chans = [x.strip().lower() for x in chans if x.strip()]
+    bad = [x for x in chans if x not in CHANNELS]
+    repeat = str(spec.get("repeat") or "none").strip().lower()
+    if not text:
+        print("ERROR: empty reminder text")
+        return
+    if bad:
+        print("ERROR: unknown channel(s) %s. allowed: %s" % (", ".join(bad), ", ".join(CHANNELS)))
+        return
+    if repeat not in REPEATS:
+        print("ERROR: repeat must be one of: " + ", ".join(REPEATS))
+        return
+    if t <= datetime.datetime.now():
+        print("ERROR: that time is in the past. now is", datetime.datetime.now().isoformat(timespec="minutes"))
+        return
+    d = load()
+    norm = lambda x: re.sub(r"[\W_]+", "", x).casefold()
+    when_s = t.isoformat(timespec="minutes")
+    for o in d["items"]:
+        # the assistant once re-created reminders it had just listed: same time and same words = one reminder
+        if o["when"] == when_s and norm(o["text"]) == norm(text):
+            print("DUPLICATE: reminder #%d already exists at %s with the same text. nothing saved." % (o["id"], when_s))
+            return
+    item = {"id": d["next_id"], "when": when_s, "text": text,
+            "channels": chans or list(c["default_channels"]), "repeat": repeat}
+    d["items"].append(item)
+    d["next_id"] += 1
+    save(d)
+    log("remind_add %s" % json.dumps(item, ensure_ascii=False))
+    print("saved reminder #%d at %s via %s, repeat %s: %s" % (
+        item["id"], item["when"], ", ".join(item["channels"]), repeat, text))
+
+
+def remind_list(c):
+    items = sorted(load()["items"], key=lambda i: i["when"])
+    if not items:
+        print("no pending reminders")
+    for i in items:
+        print("#%d %s via %s, repeat %s: %s" % (i["id"], i["when"], ", ".join(i.get("channels") or c["default_channels"]),
+                                                  i.get("repeat", "none"), i["text"]))
+
+
+def remind_cancel(c, rid):
+    d = load()
+    keep = [i for i in d["items"] if str(i["id"]) != rid]
+    if len(keep) == len(d["items"]):
+        print("ERROR: no reminder with id", rid)
+        return
+    d["items"] = keep
+    save(d)
+    log("remind_cancel " + rid)
+    print("cancelled reminder #" + rid)
+
+
+def fire_reminders(c):
+    d = load()
+    now = datetime.datetime.now().isoformat(timespec="minutes")
+    due = [i for i in d["items"] if i["when"] <= now]
+    if not due:
+        return
+    with open(c["notify_secret_file"], encoding="utf-8") as f:
+        secret = f.read().strip()
+    title = TITLES.get(c["lang"], TITLES["en"])
+    for i in due:
+        body = json.dumps({"title": title, "message": i["text"], "priority": "important",
+                           "channels": i.get("channels") or c["default_channels"]}).encode()
+        req = urllib.request.Request(c["notify_url"], data=body, method="POST",
+                                     headers={"X-Notify-Secret": secret, "Content-Type": "application/json"})
+        try:
+            urllib.request.urlopen(req, timeout=20).read()
+            # moved on only once n8n took it; otherwise it is tried again next minute
+            step = REPEATS.get(i.get("repeat", "none"))
+            if step:
+                nxt = datetime.datetime.fromisoformat(i["when"])
+                while nxt.isoformat(timespec="minutes") <= now:
+                    nxt += step
+                i["when"] = nxt.isoformat(timespec="minutes")
+            else:
+                d["items"].remove(i)
+            log("fired #%d" % i["id"])
+        except Exception as e:
+            log("fire FAILED #%d %r" % (i["id"], e))
+    save(d)
+
+
+# ---------------------------------------------------------------- entry
+USAGE = ("REFUSED: unknown action. allowed: status | restart <container> | "
+         "remind_add <time> <base64 text or json> | remind_list | remind_cancel <id>")
+
+
+def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+    c = config()
+    if argv[:1] == ["fire-reminders"]:
+        return fire_reminders(c)
+    if argv[:1] == ["ssh"]:
+        # the n8n SSH node sends "cd <dir> ; <command>" or "cd <dir> && <command>"
+        raw = re.sub(r"^cd /\S* (;|&&) ", "", os.environ.get("SSH_ORIGINAL_COMMAND", ""))
+        args = raw.split()
+    else:
+        args = argv
+    if any(not SAFE_ARG.fullmatch(a) for a in args):
+        print("REFUSED: bad characters")
+        return
+    action, rest = (args[0] if args else ""), args[1:]
+    if action == "status" and not rest:
+        status(c)
+    elif action == "restart" and len(rest) == 1:
+        restart(c, rest[0])
+    elif action == "remind_add" and len(rest) == 2:
+        remind_add(c, rest[0], rest[1])
+    elif action == "remind_list" and not rest:
+        remind_list(c)
+    elif action == "remind_cancel" and len(rest) == 1:
+        remind_cancel(c, rest[0])
+    else:
+        print(USAGE)
+
+
+if __name__ == "__main__":
+    main()
