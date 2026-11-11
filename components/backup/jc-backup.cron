@@ -1,0 +1,4 @@
+# Junkyard Cloud backups (times are the server's local time)
+0 3 * * *  root /usr/local/sbin/jc-backup
+30 4 * * * root /usr/local/sbin/jc-snapshot
+30 5 * * * root /usr/local/sbin/jc-offsite

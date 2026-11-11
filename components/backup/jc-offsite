@@ -1,0 +1,38 @@
+#!/bin/bash
+# jc-offsite: the nightly encrypted copy outside the house (restic to Cloudflare R2 or any S3 bucket).
+# Keeps 7 daily, 4 weekly and 6 monthly snapshots. Once a week (Sunday) it prunes and reads back 1/20 of the data
+# to prove the copy can be restored; the rest of the week it only adds what changed (few R2 operations).
+# Settings: /etc/junkyard/backup.conf (OFFSITE_ENV, OFFSITE_PATHS, OFFSITE_EXCLUDE).
+set -uo pipefail
+. "${JC_BACKUP_CONF:-/etc/junkyard/backup.conf}"
+# shellcheck source=/dev/null
+. "$OFFSITE_ENV"
+LOG=$BACKUP_ROOT/logs/offsite.log
+STATUS=$STATUS_DIR/offsite.json
+mkdir -p "$(dirname "$LOG")" "$STATUS_DIR"
+exec 9>/run/jc-offsite.lock
+flock -n 9 || { echo "$(date '+%F %T') already running, skip" >> "$LOG"; exit 0; }
+log() { echo "$(date '+%F %T') $*" >> "$LOG"; }
+alert() {
+  if [ "${LANG_CODE:-en}" = ar ]; then jc-notify "⚠️ النسخة خارج المنزل" "$1 - السجل: $LOG" important
+  else jc-notify "⚠️ Off-site backup" "$1 - log: $LOG" important; fi
+}
+status() { jc-backup-status "$STATUS" "$1" "$2" "$OFFSITE_ENV"; }
+# the nightly copy must be finished first (it holds the database dumps)
+for i in $(seq 1 120); do pgrep -f "/jc-backup$" >/dev/null || break; sleep 30; done
+log "=== start"
+EX=(); for x in ${OFFSITE_EXCLUDE:-}; do EX+=(--exclude "$x"); done
+PATHS=(); for p in $OFFSITE_PATHS; do [ -e "$p" ] && PATHS+=("$p"); done
+restic backup --one-file-system --tag nightly "${EX[@]}" "${PATHS[@]}" >> "$LOG" 2>&1
+rc=$?
+if [ $rc -ne 0 ] && [ $rc -ne 3 ]; then   # 3 = some files could not be read, the snapshot was still made
+  log "FAILED backup rc=$rc"; status fail "backup rc=$rc"; alert "restic backup rc=$rc"; exit 1
+fi
+restic forget --keep-daily 7 --keep-weekly 4 --keep-monthly 6 >> "$LOG" 2>&1
+if [ "$(date +%u)" = 7 ] || [ "${FORCE_CHECK:-0}" = 1 ]; then
+  restic prune >> "$LOG" 2>&1 || { log "prune failed"; alert "prune failed"; }
+  restic check --read-data-subset=1/20 >> "$LOG" 2>&1 || {
+    log "CHECK FAILED"; status fail "check failed"; alert "the weekly check found a problem"; exit 1; }
+fi
+log "=== ok rc=$rc"
+status ok ""

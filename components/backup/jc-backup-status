@@ -1,0 +1,12 @@
+#!/bin/bash
+# jc-backup-status <json file> <ok|fail> <note> <restic env file> [tag]
+# writes {"status","finished","size","snapshots"} for a restic repository, like the other backup cards
+F=$1; R=$2; NOTE=$3; ENVF=$4; TAG=${5:-}
+# shellcheck source=/dev/null
+. "$ENVF"
+ARGS=(); [ -n "$TAG" ] && ARGS=(--tag "$TAG")
+size=$(restic stats --mode raw-data "${ARGS[@]}" 2>/dev/null | awk '/Total Size/{print $3$4}')
+n=$(restic snapshots --json "${ARGS[@]}" 2>/dev/null | python3 -c 'import json,sys;print(len(json.load(sys.stdin)))' 2>/dev/null)
+if [ "$R" = ok ]; then st=OK; else st="FAILED: $NOTE"; fi
+printf '{"status":"%s","finished":"%s","size":"%s","snapshots":%s}\n' "$st" "$(date -Is)" "${size:-?}" "${n:-0}" > "$F.tmp"
+chmod 644 "$F.tmp"; mv "$F.tmp" "$F"

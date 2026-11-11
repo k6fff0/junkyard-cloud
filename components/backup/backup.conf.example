@@ -1,0 +1,22 @@
+# /etc/junkyard/backup.conf - read by jc-backup, jc-offsite and jc-snapshot (shell syntax).
+BACKUP_ROOT=/mnt/storage/backups          # on the big disk, never on the system disk
+STATUS_DIR=/mnt/storage/backups/status    # small JSON files the home page cards read
+KEEP_DAYS=3                               # nightly copies kept
+LANG_CODE=en                              # language of the alerts: en | ar
+# Database containers that must always be dumped: if one is missing, the backup fails and you are told.
+# Any other running Postgres/MySQL/MariaDB container is found and dumped by itself.
+REQUIRED_DBS="n8n-postgres immich_postgres paperless_db"
+# Files that must exist in the copy (a quick sanity check). Empty = no check.
+MUST_HAVE="/opt/junkyard /etc/cloudflared"
+# Folders copied every night (with hard links: unchanged files cost nothing)
+FILES="/opt /etc /root /home /usr/local /var/spool/cron /var/lib/jc-ops"
+EXCLUDE="*.log /opt/containerd/"
+SKIP_VOLUMES=""                           # docker volumes that are only caches
+# Off-site copy (jc-offsite): restic to Cloudflare R2 (or any S3). The env file holds the keys and the
+# repository password; without that password the copy can never be read.
+OFFSITE_ENV=/root/.restic/offsite.env
+OFFSITE_PATHS="/mnt/storage/backups/nightly /mnt/storage/photos /mnt/storage/paperless"
+OFFSITE_EXCLUDE="/mnt/storage/photos/encoded-video /mnt/storage/photos/thumbs"
+# System disk image (jc-snapshot): one copy in a local restic repository, refreshed every 3 days.
+SNAPSHOT_ENV=/root/.restic/local.env
+SNAPSHOT_EVERY_DAYS=3

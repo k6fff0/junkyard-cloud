@@ -1,0 +1,64 @@
+#!/bin/bash
+# jc-snapshot: ONE image of the system disk (/, /boot, /boot/efi) plus the disk layout, in a local restic
+# repository on the big disk. Refreshed every SNAPSHOT_EVERY_DAYS days with the changes only; the old one is
+# removed after the new one is made. With it a dead system disk is replaced by a new one that boots as before
+# (see the restore guide). Run daily from cron; FORCE=1 runs it now.
+set -uo pipefail
+. "${JC_BACKUP_CONF:-/etc/junkyard/backup.conf}"
+# shellcheck source=/dev/null
+. "$SNAPSHOT_ENV"
+export LVM_SUPPRESS_FD_WARNINGS=1
+LOG=$BACKUP_ROOT/logs/snapshot.log
+STATUS=$STATUS_DIR/snapshot.json
+LAYOUT=/var/backups/jc-layout
+STAMP=/var/lib/jc-snapshot/last-ok
+mkdir -p "$(dirname "$LOG")" "$LAYOUT" "$(dirname "$STAMP")" "$STATUS_DIR"
+exec 9>/run/jc-snapshot.lock
+flock -n 9 || exit 0
+log() { echo "$(date '+%F %T') $*" >> "$LOG"; }
+EVERY=$(( ${SNAPSHOT_EVERY_DAYS:-3} * 86400 - 7200 ))
+if [ "${FORCE:-0}" != 1 ] && [ -f "$STAMP" ] && [ $(( $(date +%s) - $(cat "$STAMP") )) -lt $EVERY ]; then exit 0; fi
+log "=== start"
+# 1) the disk layout, so a new disk can be made the same (all small; it lands inside the snapshot)
+ROOTSRC=$(findmnt -no SOURCE /)
+# walk up from the root filesystem (partition, LVM, RAID...) to the physical disk
+DISK=/dev/$(lsblk -snlo NAME,TYPE "$ROOTSRC" | awk '$2=="disk"{print $1; exit}')
+{
+  echo "root=$ROOTSRC disk=$DISK"                        > $LAYOUT/root.txt
+  sfdisk -d "$DISK"                                       > $LAYOUT/disk.sfdisk
+  if command -v vgs >/dev/null && vgs --noheadings 2>/dev/null | grep -q .; then
+    for vg in $(vgs --noheadings -o vg_name); do vgcfgbackup -f "$LAYOUT/$vg.vg" "$vg" >/dev/null; done
+    pvs --noheadings -o pv_name,pv_uuid,vg_name           > $LAYOUT/pvs.txt
+  fi
+  blkid                                                   > $LAYOUT/blkid.txt
+  lsblk -f -o NAME,SIZE,TYPE,FSTYPE,UUID,LABEL,MOUNTPOINT > $LAYOUT/lsblk.txt
+  for p in /boot /boot/efi /; do echo "$p $(findmnt -no SOURCE,FSTYPE,UUID,LABEL $p 2>/dev/null)"; done > $LAYOUT/mounts.txt
+  efibootmgr -v                                           > $LAYOUT/efibootmgr.txt 2>&1
+  cp /etc/fstab $LAYOUT/fstab
+  dpkg --get-selections                                   > $LAYOUT/dpkg-selections.txt
+  docker ps -a --format "{{.Names}}\t{{.Image}}\t{{.Status}}" > $LAYOUT/containers.txt
+  iptables-save                                           > $LAYOUT/iptables.txt
+  date -Is                                                > $LAYOUT/taken-at.txt
+} 2>>"$LOG" || log "warning: some layout facts could not be read"
+chmod -R go-rwx $LAYOUT
+# 2) the whole system disk; tonight's consistent database dumps ride along at a fixed path
+for i in $(seq 1 60); do pgrep -f "/jc-backup$" >/dev/null || break; sleep 30; done
+DUMPS=$(ls -1d "$BACKUP_ROOT"/nightly/20??-??-??/databases 2>/dev/null | tail -1)
+mkdir -p /var/backups/jc-dbdumps && chmod 700 /var/backups/jc-dbdumps
+[ -n "$DUMPS" ] && rsync -a --delete "$DUMPS"/ /var/backups/jc-dbdumps/
+FAIL=""
+restic backup --tag system --host "$(hostname)" --one-file-system \
+  --exclude /swap.img --exclude /var/cache/restic --exclude /lost+found --exclude /tmp --exclude /var/tmp \
+  / /boot /boot/efi >> "$LOG" 2>&1
+rc=$?; [ $rc -eq 0 ] || [ $rc -eq 3 ] || FAIL="system rc=$rc"
+# 3) keep one snapshot only, and really free the old data
+[ -z "$FAIL" ] && { restic forget --tag system --keep-last 1 --prune >> "$LOG" 2>&1 || FAIL="prune"; }
+if [ -n "$FAIL" ]; then
+  jc-backup-status "$STATUS" fail "$FAIL" "$SNAPSHOT_ENV" system
+  if [ "${LANG_CODE:-en}" = ar ]; then jc-notify "⚠️ صورة قرص النظام" "فشلت: $FAIL - السجل: $LOG" important
+  else jc-notify "⚠️ System disk image" "failed: $FAIL - log: $LOG" important; fi
+else
+  jc-backup-status "$STATUS" ok "" "$SNAPSHOT_ENV" system
+  date +%s > "$STAMP"
+fi
+log "=== end ${FAIL:-ok}"

@@ -1,0 +1,14 @@
+#!/bin/sh
+# jc-notify <title> <message> [priority]   - tell the owner through the assistant's Notify Me webhook.
+# priority: normal | important | emergency (emergency may call their phone). Never fails the caller.
+CONF=${JC_CONF:-/etc/junkyard}
+URL=$(cat "$CONF/notify-url" 2>/dev/null || echo http://127.0.0.1:5678/webhook/notify)
+SECRET=$(cat "$CONF/notify-secret" 2>/dev/null || true)
+[ -n "$SECRET" ] || { echo "jc-notify: no $CONF/notify-secret" >&2; exit 0; }
+python3 - "$1" "$2" "${3:-important}" > "${TMPDIR:-/tmp}/jc-notify.$$" <<'PY'
+import json, sys
+print(json.dumps({"title": sys.argv[1], "message": sys.argv[2], "priority": sys.argv[3]}))
+PY
+curl -s -m 20 -o /dev/null -X POST "$URL" -H "X-Notify-Secret: $SECRET" -H "Content-Type: application/json" \
+  --data-binary "@${TMPDIR:-/tmp}/jc-notify.$$" || true
+rm -f "${TMPDIR:-/tmp}/jc-notify.$$"

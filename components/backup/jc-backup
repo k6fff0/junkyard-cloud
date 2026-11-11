@@ -1,0 +1,171 @@
+#!/bin/bash
+# jc-backup: the nightly copy of everything on the system disk, onto the big disk.
+#   $BACKUP_ROOT/nightly/<date>/
+#     databases/  consistent dumps of every running Postgres / MySQL / MariaDB container (gzip, checked)
+#     sqlite/     online copies of every SQLite file under /opt (safe while the apps run, checked)
+#     files/      $FILES + every docker volume in use (rsync --link-dest: unchanged files are hard links)
+#     meta/       images, containers, compose projects, packages, disks, network, enabled services
+# New things are picked up by themselves: a new database container is dumped (and its raw folder left out of
+# files/), a new SQLite file is copied, a new volume is copied. An old copy is deleted only after the new one
+# passed every check. Settings: /etc/junkyard/backup.conf (see backup.conf.example).
+set -Eeuo pipefail
+umask 077
+CONF=${JC_BACKUP_CONF:-/etc/junkyard/backup.conf}
+# shellcheck source=/dev/null
+. "$CONF"
+: "${BACKUP_ROOT:?}" "${STATUS_DIR:?}"
+KEEP_DAYS=${KEEP_DAYS:-3}
+SQLITE_ROOT=${SQLITE_ROOT:-/opt}
+ROOT=$BACKUP_ROOT/nightly
+DAY=${JC_DAY:-$(date +%F)}
+DEST=$ROOT/$DAY
+PREV=$(ls -1d "$ROOT"/20??-??-?? 2>/dev/null | grep -v "/$DAY$" | sort | tail -1 || true)
+LOG=$ROOT/logs/backup.log
+mkdir -p "$ROOT/logs" "$STATUS_DIR" "$DEST"/{databases,sqlite,files,meta}
+chmod 700 "$ROOT"
+exec >>"$LOG" 2>&1
+log() { echo "$(date '+%F %T') $*"; }
+
+write_status() {
+  local size count
+  size=$(du -sh "$DEST" 2>/dev/null | cut -f1 || echo "?")
+  count=$(ls -1d "$ROOT"/20??-??-?? 2>/dev/null | wc -l)
+  printf '{"status":"%s","finished":"%s","size":"%s","snapshots":%s}\n' "$1" "$(date -Is)" "$size" "$count" \
+    >"$STATUS_DIR/nightly.json.tmp" && chmod 644 "$STATUS_DIR/nightly.json.tmp" \
+    && mv "$STATUS_DIR/nightly.json.tmp" "$STATUS_DIR/nightly.json"
+}
+fail() {
+  trap - ERR
+  log "FAILED: $1 (older copies left untouched)"
+  write_status "FAILED: $1"
+  if [ "${LANG_CODE:-en}" = ar ]; then
+    jc-notify "⚠️ فشل النسخ الاحتياطي الليلي" "$1 - السجل: $LOG" important
+  else
+    jc-notify "⚠️ Nightly backup failed" "$1 - log: $LOG" important
+  fi
+  exit 1
+}
+trap 'fail "error on line $LINENO"' ERR
+log "=== start -> $DEST"
+
+# ---------- 1. databases (dumped while running, consistent) ----------
+DB_DATA='^/var/lib/(postgresql|mysql)(/|$)'
+EXCL=()
+DONE=()
+pg() {
+  docker exec "$1" sh -c 'unset PGHOST; pg_dumpall --clean --if-exists -U "${POSTGRES_USER:-postgres}"' | gzip -6 >"$DEST/databases/$1.sql.gz"
+  gzip -t "$DEST/databases/$1.sql.gz"
+  zcat "$DEST/databases/$1.sql.gz" | tail -n 5 | grep -q "PostgreSQL database cluster dump complete" || fail "$1 dump incomplete"
+}
+my() {
+  docker exec "$1" sh -c '
+    D=$(command -v mysqldump || command -v mariadb-dump)
+    if [ -n "${MYSQL_USER:-}" ] && [ -n "${MYSQL_DATABASE:-}" ]; then
+      exec $D -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" --single-transaction --routines --triggers --no-tablespaces "$MYSQL_DATABASE"
+    elif [ -n "${MARIADB_USER:-}" ] && [ -n "${MARIADB_DATABASE:-}" ]; then
+      exec $D -u"$MARIADB_USER" -p"$MARIADB_PASSWORD" --single-transaction --routines --triggers --no-tablespaces "$MARIADB_DATABASE"
+    else
+      exec $D -uroot -p"${MYSQL_ROOT_PASSWORD:-$MARIADB_ROOT_PASSWORD}" --single-transaction --routines --triggers --all-databases
+    fi' 2>/dev/null | gzip -6 >"$DEST/databases/$1.sql.gz"
+  gzip -t "$DEST/databases/$1.sql.gz"
+  zcat "$DEST/databases/$1.sql.gz" | tail -n 1 | grep -q "Dump completed" || fail "$1 dump incomplete"
+}
+for c in $(docker ps --format '{{.Names}}' | sort); do
+  img=$(docker inspect -f '{{.Config.Image}}' "$c")
+  case "$img" in
+    *postgres*|*postgis*|*timescale*|*pgvector*|*vectorchord*) kind=pg ;;
+    *mysql*|*mariadb*) kind=my ;;
+    *) continue ;;
+  esac
+  # a real database server keeps its data in /var/lib/postgresql or /var/lib/mysql (a client image does not)
+  mounts=$(docker inspect -f '{{range .Mounts}}{{.Type}}|{{.Source}}|{{.Destination}}{{"\n"}}{{end}}' "$c")
+  echo "$mounts" | cut -d'|' -f3 | grep -Eq "$DB_DATA" || continue
+  if [ "$kind" = pg ] && ! docker exec "$c" sh -c 'unset PGHOST; pg_isready -q -h /var/run/postgresql' 2>/dev/null; then
+    case " ${REQUIRED_DBS:-} " in *" $c "*) fail "$c is not answering" ;; esac
+    log "skip $c (no database server answering)"; continue
+  fi
+  if [ "$kind" = pg ]; then pg "$c"; else my "$c"; fi
+  DONE+=("$c")
+  while IFS='|' read -r type src dst; do
+    [ "$type" = bind ] && echo "$dst" | grep -Eq "$DB_DATA" && EXCL+=("--exclude=${src%/}/")
+  done <<<"$mounts"
+done
+for c in ${REQUIRED_DBS:-}; do
+  printf '%s\n' "${DONE[@]:-}" | grep -qx "$c" || fail "database $c was not dumped (container gone or stopped?)"
+done
+log "databases ok: ${#DONE[@]} ($(du -sh "$DEST/databases" | cut -f1))"
+
+# ---------- 2. SQLite files (online backup API, safe while the app runs) ----------
+python3 - "$SQLITE_ROOT" "$DEST/sqlite" <<'PY'
+import os, sqlite3, sys
+root, out = sys.argv[1], sys.argv[2]
+n = 0
+for base, dirs, files in os.walk(root):
+    dirs[:] = [d for d in dirs if d not in ("postgres", "postgres_data", "mysql", "node_modules", "vendor", ".git")]
+    for f in files:
+        p = os.path.join(base, f)
+        try:
+            with open(p, "rb") as fh:
+                if fh.read(16) != b"SQLite format 3\x00":
+                    continue
+        except OSError:
+            continue
+        dst = os.path.join(out, p.lstrip("/"))
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        src = sqlite3.connect("file:%s?mode=ro" % p, uri=True, timeout=30)
+        d = sqlite3.connect(dst)
+        src.backup(d)
+        ok = d.execute("PRAGMA quick_check").fetchone()[0]
+        d.close(); src.close()
+        if ok != "ok":
+            raise SystemExit("sqlite check failed: " + p)
+        n += 1
+print("sqlite copies:", n)
+PY
+
+# ---------- 3. files ----------
+LINK=()
+[ -n "$PREV" ] && [ -d "$PREV/files" ] && LINK=(--link-dest="$PREV/files")
+XARGS=()
+for x in ${EXCLUDE:-}; do XARGS+=("--exclude=$x"); done
+# shellcheck disable=SC2086
+rsync -aHAX --numeric-ids --delete "${LINK[@]}" --relative "${XARGS[@]}" "${EXCL[@]}" \
+  $(for f in ${FILES:-/opt /etc}; do [ -e "$f" ] && echo "$f"; done) "$DEST/files/" || {
+    rc=$?; [ $rc -eq 24 ] || fail "copying files failed (rsync $rc)"; }   # 24 = a file vanished while copying
+VOLS=$(docker ps -aq | xargs -r docker inspect -f '{{range .Mounts}}{{if eq .Type "volume"}}{{.Name}}|{{.Destination}}{{"\n"}}{{end}}{{end}}' \
+  | grep -v '^$' | sort -u || true)
+DBVOLS=$(echo "$VOLS" | awk -F'|' '$2 ~ /^\/var\/lib\/(postgresql|mysql)(\/|$)/ {print $1}' | sort -u)
+VROOT=${DOCKER_VOLUMES:-/var/lib/docker/volumes}
+for v in $(echo "$VOLS" | cut -d'|' -f1 | sort -u); do
+  echo "$DBVOLS" | grep -qx "$v" && continue            # covered by the dumps
+  case " ${SKIP_VOLUMES:-} " in *" $v "*) continue ;; esac
+  [ -d "$VROOT/$v/_data" ] || continue
+  vl=(); [ -n "$PREV" ] && [ -d "$PREV/files/docker-volumes/$v" ] && vl=(--link-dest="$PREV/files/docker-volumes/$v")
+  mkdir -p "$DEST/files/docker-volumes/$v"
+  rsync -aHAX --numeric-ids --delete "${vl[@]}" "$VROOT/$v/_data/" "$DEST/files/docker-volumes/$v/"
+done
+for m in ${MUST_HAVE:-}; do
+  [ -e "$DEST/files$m" ] || fail "missing in the copy: $m"
+done
+COUNT=$(find "$DEST/files" -type f | wc -l)
+if [ -n "$PREV" ] && [ -f "$PREV/meta/file-count" ]; then
+  PC=$(cat "$PREV/meta/file-count")
+  [ "$COUNT" -ge $(( PC * 90 / 100 )) ] || fail "only $COUNT files (the copy before had $PC)"
+fi
+echo "$COUNT" >"$DEST/meta/file-count"
+log "files ok: $COUNT"
+
+# ---------- 4. meta: what is installed and running, for a rebuild ----------
+docker images --digests --format '{{.Repository}}:{{.Tag}} {{.Digest}}' | sort >"$DEST/meta/docker-images.txt" || true
+docker ps --format '{{.Names}}\t{{.Image}}\t{{.Ports}}' | sort >"$DEST/meta/containers.txt" || true
+docker compose ls -a --format json >"$DEST/meta/compose-projects.json" 2>/dev/null || true
+command -v dpkg >/dev/null && dpkg --get-selections >"$DEST/meta/packages.txt" || true
+command -v systemctl >/dev/null && systemctl list-unit-files --state=enabled --no-pager >"$DEST/meta/enabled-units.txt" || true
+lsblk -o NAME,SIZE,TYPE,FSTYPE,UUID,MOUNTPOINT >"$DEST/meta/disks.txt" 2>/dev/null || true
+[ -f /etc/fstab ] && cp /etc/fstab "$DEST/meta/" || true
+ip -br addr >"$DEST/meta/ip.txt" 2>/dev/null || true
+
+# ---------- 5. keep the newest copies: only now that today's passed ----------
+ls -1d "$ROOT"/20??-??-?? | sort | head -n -"$KEEP_DAYS" | while read -r old; do log "prune $old"; rm -rf "$old"; done
+write_status OK
+log "=== ok $(du -sh "$DEST" | cut -f1)"
