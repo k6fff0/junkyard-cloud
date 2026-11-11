@@ -1,0 +1,18 @@
+{
+  "language_name": "English",
+  "messages": {
+    "archiving": "📥 Got it. Saving it to the archive and reading it... I'll send you a summary in a few seconds.",
+    "archive_failed": "⚠️ I couldn't save the file to the archive: {error}",
+    "photos_failed": "⚠️ I couldn't save the photos to the archive: {error}",
+    "already_archived": "📄 This file is already in the archive: document #{id}, {title}.{link}",
+    "video_not_archived": "🎬 The archive doesn't keep videos. Tell me if you want me to do something with it.",
+    "wa_no_media": "⚠️ A file arrived, but I couldn't download it from WhatsApp{reason}.",
+    "wa_download_failed": "⚠️ I couldn't download the file from WhatsApp ({status}).",
+    "too_big": "📦 This file is bigger than {mb} MB, too big for chat.{upload}",
+    "upload_docs": "\nUpload it to the archive: {url}",
+    "upload_pdf": "\nOr edit it here: {url}"
+  },
+  "file_words": ["file", "files", "photo", "photos", "picture", "pictures", "image", "images", "these", "those",
+                 "save", "store", "convert", "merge", "combine", "pdf", "word", "excel", "compress", "split",
+                 "rename", "name it", "archive", "document", "documents", "scan"]
+}
