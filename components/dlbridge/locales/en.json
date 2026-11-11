@@ -1,0 +1,15 @@
+{
+  "done": "✅ Download finished",
+  "failed": "❌ Download failed",
+  "video_started": "⬇️ Started downloading the {what}",
+  "video_done": "✅ Finished downloading the {what}",
+  "video_failed": "❌ Couldn't download the {what}",
+  "video": "video",
+  "audio": "audio",
+  "size": "Size",
+  "where": "Saved in",
+  "reason": "Reason",
+  "unknown": "unknown",
+  "space_title": "📦 Downloads space",
+  "space_body": "The downloads folder reached {used} (limit {limit}).\nFree space on the disk: {free}."
+}
