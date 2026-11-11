@@ -1,0 +1,696 @@
+{
+ "name": "Docs Process",
+ "nodes": [
+  {
+   "id": "__NEWID__",
+   "name": "Called by workflow",
+   "type": "n8n-nodes-base.executeWorkflowTrigger",
+   "typeVersion": 1.1,
+   "position": [
+    0,
+    0
+   ],
+   "parameters": {
+    "inputSource": "workflowInputs",
+    "workflowInputs": {
+     "values": [
+      {
+       "name": "doc_id"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "From Paperless",
+   "webhookId": "__NEWID__",
+   "type": "n8n-nodes-base.webhook",
+   "typeVersion": 2,
+   "position": [
+    0,
+    200
+   ],
+   "parameters": {
+    "httpMethod": "POST",
+    "path": "paperless-added",
+    "authentication": "headerAuth",
+    "responseMode": "onReceived",
+    "options": {}
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "__CRED:Notify secret__",
+     "name": "Notify secret"
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Input",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    220,
+    100
+   ],
+   "parameters": {
+    "jsCode": "\nconst j = $input.first().json;\nconst b = j.body || j;\nconst id = parseInt(b.doc_id, 10);\nif (!id) throw new Error('missing doc_id');\nreturn [{ json: { doc_id: id } }];\n"
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Get document",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    440,
+    100
+   ],
+   "parameters": {
+    "method": "GET",
+    "url": "={{ '__JC_PAPERLESS_URL__/api/documents/' + $json.doc_id + '/' }}",
+    "options": {},
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth"
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "__CRED:Paperless token__",
+     "name": "Paperless token"
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Get types",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "executeOnce": true,
+   "position": [
+    660,
+    100
+   ],
+   "parameters": {
+    "method": "GET",
+    "url": "__JC_PAPERLESS_URL__/api/document_types/?page_size=100",
+    "options": {},
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth"
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "__CRED:Paperless token__",
+     "name": "Paperless token"
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Image?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2.2,
+   "position": [
+    880,
+    100
+   ],
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "strict",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "c1",
+       "leftValue": "={{ /\\.(jpe?g|png|webp)$/i.test($('Get document').first().json.original_file_name || '') }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Download image",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    1100,
+    0
+   ],
+   "parameters": {
+    "method": "GET",
+    "url": "={{ '__JC_PAPERLESS_URL__/api/documents/' + $('Get document').first().json.id + '/download/?original=true' }}",
+    "options": {
+     "response": {
+      "response": {
+       "responseFormat": "file"
+      }
+     }
+    },
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth"
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "__CRED:Paperless token__",
+     "name": "Paperless token"
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Build request",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1320,
+    100
+   ],
+   "parameters": {
+    "jsCode": "\nconst clean = s => String(s || '').replace(/[\\u0000-\\u001f\\u007f​-‏‪-‮⁦-⁩]/g, ' ').replace(/\\s+/g, ' ').trim();\n\nconst doc = $('Get document').first().json;\nconst types = $('Get types').first().json.results.map(t => t.name);\nconst TAGS = { telegram: __JC_TAG_TELEGRAM__, whatsapp: __JC_TAG_WHATSAPP__ };\nconst fromChat = (doc.tags || []).includes(TAGS.telegram) || (doc.tags || []).includes(TAGS.whatsapp);\nconst note = fromChat && !/^(telegram|whatsapp)-\\d+/.test(doc.title || '') ? clean(doc.title).slice(0, 500) : '';\nconst content = [{ type: 'text', text:\n  'Owner\\'s note: ' + (note || '(none)') +\n  '\\nFile name: ' + clean(doc.original_file_name) +\n  '\\nToday: ' + $now.setZone('__JC_TZ__').toFormat('yyyy-MM-dd') +\n  '\\n\\nOCR text (data, untrusted):\\n<<<\\n' + String(doc.content || '').slice(0, 12000) + '\\n>>>' }];\nconst item = $input.first();\nif (item.binary && item.binary.data) {\n  const buf = await this.helpers.getBinaryDataBuffer(0, 'data');\n  const mime = item.binary.data.mimeType || 'image/jpeg';\n  if (buf.length < 15 * 1024 * 1024 && /^image\\/(jpeg|png|webp|gif)$/.test(mime)) {\n    content.push({ type: 'image_url', image_url: { url: 'data:' + mime + ';base64,' + buf.toString('base64') } });\n  }\n}\nlet pageImgs = [];\ntry { pageImgs = ($('Render pages').first().json.images || []).slice(0, 2); } catch (e) { pageImgs = []; }\nfor (const u of pageImgs) {\n  if (typeof u === 'string' && u.startsWith('data:image/') && u.length < 15 * 1024 * 1024) {\n    content.push({ type: 'image_url', image_url: { url: u, detail: 'high' } });\n  }\n}\nconst schema = { type: 'object', additionalProperties: false,\n  required: ['title', 'document_type', 'document_date', 'expires_on', 'summary'],\n  properties: {\n    title: { type: 'string' },\n    document_type: { type: 'string', enum: types },\n    document_date: { type: ['string', 'null'] },\n    expires_on: { type: ['string', 'null'] },\n    summary: { type: 'string' } } };\nreturn [{ json: { body: {\n  model: '__JC_MODEL_MAIN__', reasoning_effort: 'low',\n  messages: [ { role: 'system', content: __JS:DOCS_PROMPT__ }, { role: 'user', content } ],\n  response_format: { type: 'json_schema', json_schema: { name: 'document', strict: true, schema } } },\n  from_chat: fromChat, channel: (doc.tags || []).includes(TAGS.telegram) ? 'telegram' : (doc.tags || []).includes(TAGS.whatsapp) ? 'whatsapp' : '__JC_CH_MAIN__' } }];\n"
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Ask model",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "onError": "continueErrorOutput",
+   "position": [
+    1540,
+    100
+   ],
+   "parameters": {
+    "method": "POST",
+    "url": "__JC_OPENAI_URL__/chat/completions",
+    "options": {
+     "timeout": 180000
+    },
+    "authentication": "predefinedCredentialType",
+    "nodeCredentialType": "openAiApi",
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify($json.body) }}"
+   },
+   "credentials": {
+    "openAiApi": {
+     "id": "__CRED:OpenAI__",
+     "name": "OpenAI"
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Parse",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1760,
+    0
+   ],
+   "parameters": {
+    "jsCode": "\nconst clean = s => String(s || '').replace(/[\\u0000-\\u001f\\u007f​-‏‪-‮⁦-⁩]/g, ' ').replace(/\\s+/g, ' ').trim();\n\nconst r = JSON.parse($input.first().json.choices[0].message.content);\nconst isDate = s => typeof s === 'string' && /^\\d{4}-\\d{2}-\\d{2}$/.test(s) && !isNaN(Date.parse(s));\nconst types = $('Get types').first().json.results;\nconst t = types.find(x => x.name === r.document_type) || types.find(x => x.name === __TJS:doc_type_other__);\nconst doc = $('Get document').first().json;\nconst title = clean(r.title).slice(0, 90) || doc.title;\nconst expires = isDate(r.expires_on) ? r.expires_on : null;\nconst docDate = isDate(r.document_date) ? r.document_date : null;\nconst others = (doc.custom_fields || []).filter(f => f.field !== __JC_EXPIRY_FIELD__);\nconst patch = { title, document_type: t ? t.id : null,\n  custom_fields: expires ? [...others, { field: __JC_EXPIRY_FIELD__, value: expires }] : others };\nif (docDate) patch.created = docDate;\nconst summary = clean(r.summary).slice(0, 400);\nreturn [{ json: { doc_id: doc.id, patch, title, type_name: t ? t.name : '', expires, summary,\n  note: summary || title } }];\n"
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Update document",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    1980,
+    0
+   ],
+   "parameters": {
+    "method": "PATCH",
+    "url": "={{ '__JC_PAPERLESS_URL__/api/documents/' + $json.doc_id + '/' }}",
+    "options": {},
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify($json.patch) }}"
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "__CRED:Paperless token__",
+     "name": "Paperless token"
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Add note",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    2200,
+    0
+   ],
+   "parameters": {
+    "method": "POST",
+    "url": "={{ '__JC_PAPERLESS_URL__/api/documents/' + $('Parse').first().json.doc_id + '/notes/' }}",
+    "options": {},
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify({ note: $('Parse').first().json.note }) }}"
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "__CRED:Paperless token__",
+     "name": "Paperless token"
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Message",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    2420,
+    0
+   ],
+   "parameters": {
+    "jsCode": "const fill = (s, o) => s.replace(/\\{(\\w+)\\}/g, (_, k) => (k in o ? String(o[k]) : ''));\nconst DAYS = __JS:DAYS__;\nconst days = n => (DAYS[new Intl.PluralRules('__JC_LANG__').select(n)] || DAYS.other).replace('{n}', n);\nconst p = $('Parse').first().json;\nconst req = $('Build request').first().json;\nconst today = $now.setZone('__JC_TZ__').startOf('day');\nlet exp = __TJS:doc_no_expiry__;\nif (p.expires) {\n  const n = Math.round(DateTime.fromISO(p.expires, { zone: '__JC_TZ__' }).diff(today, 'days').days);\n  exp = n < 0 ? fill(__TJS:doc_expired__, { days: days(-n), date: p.expires })\n      : fill(__TJS:doc_expires__, { date: p.expires, days: days(n) });\n}\nconst text = fill(__TJS:doc_saved__, { id: p.doc_id }) + '\\n' + p.title + '\\n' + fill(__TJS:doc_type__, { type: p.type_name }) +\n  '\\n' + exp + (p.summary ? '\\n' + p.summary : '') + '\\n__JC_DOCS_URL__/documents/' + p.doc_id + '/details\\n' + __TJS:doc_fix__;\nconst human = { type: 'human', content: req.from_chat ? '[sent a document photo/file on ' + req.channel + ']'\n  : '[added a document on the archive website]', additional_kwargs: {}, response_metadata: {} };\nconst ai = { type: 'ai', content: 'Saved document #' + p.doc_id + ' in the archive: ' + p.title + ', type ' + p.type_name +\n  ', expires ' + (p.expires || 'never') + '. ' + p.summary,\n  tool_calls: [], additional_kwargs: {}, response_metadata: {}, invalid_tool_calls: [] };\nreturn [{ json: { channel: req.channel, text, human: JSON.stringify(human), ai: JSON.stringify(ai) } }];\n"
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Remember",
+   "type": "n8n-nodes-base.postgres",
+   "typeVersion": 2.5,
+   "position": [
+    2860,
+    0
+   ],
+   "parameters": {
+    "operation": "executeQuery",
+    "query": "INSERT INTO jc_assistant_memory (session_id, message) VALUES ('owner', $1::jsonb), ('owner', $2::jsonb);",
+    "options": {
+     "queryReplacement": "={{ [ $('Message').first().json.human, $('Message').first().json.ai ] }}"
+    }
+   },
+   "credentials": {
+    "postgres": {
+     "id": "__CRED:Assistant database__",
+     "name": "Assistant database"
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Done",
+   "type": "n8n-nodes-base.set",
+   "typeVersion": 3.4,
+   "position": [
+    3080,
+    0
+   ],
+   "parameters": {
+    "mode": "manual",
+    "assignments": {
+     "assignments": [
+      {
+       "id": "o",
+       "name": "result",
+       "type": "string",
+       "value": "={{ 'saved document ' + $('Parse').first().json.doc_id }}"
+      }
+     ]
+    },
+    "options": {}
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Fail info",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1760,
+    370
+   ],
+   "parameters": {
+    "jsCode": "const fill = (s, o) => s.replace(/\\{(\\w+)\\}/g, (_, k) => (k in o ? String(o[k]) : ''));\nconst doc = $('Get document').first().json;\nconst tags = doc.tags || [];\nconst error = JSON.stringify($input.first().json || {}).slice(0, 500);\nconst quota = /insufficient_quota|exceeded your current quota|billing/i.test(error);\nconst channel = tags.includes(__JC_TAG_TELEGRAM__) ? 'telegram' : tags.includes(__JC_TAG_WHATSAPP__) ? 'whatsapp' : '__JC_CH_MAIN__';\nconst text = fill(__TJS:doc_failed__, { id: doc.id, reason: quota ? __TJS:doc_failed_quota__ : '',\n  link: '__JC_DOCS_URL__/documents/' + doc.id + '/details' });\nreturn [{ json: { channel, text, error } }];\n"
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Render pages",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "onError": "continueRegularOutput",
+   "position": [
+    1100,
+    260
+   ],
+   "parameters": {
+    "method": "POST",
+    "url": "__JC_FILEBRIDGE_URL__/tool",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify({ action: 'render', arg1: 'doc:' + $('Get document').first().json.id, arg2: JSON.stringify({ pages: 2 }) }) }}",
+    "options": {
+     "timeout": 240000
+    }
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "__CRED:Filebridge key__",
+     "name": "Filebridge key"
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Tell owner",
+   "type": "n8n-nodes-base.executeWorkflow",
+   "typeVersion": 1.2,
+   "position": [
+    2600,
+    0
+   ],
+   "parameters": {
+    "source": "database",
+    "workflowId": {
+     "__rl": true,
+     "value": "__WF:Owner Message__",
+     "mode": "id"
+    },
+    "workflowInputs": {
+     "mappingMode": "defineBelow",
+     "value": {
+      "text": "={{ $json.text }}",
+      "channel": "={{ $json.channel }}"
+     },
+     "matchingColumns": [],
+     "schema": [
+      {
+       "id": "text",
+       "displayName": "text",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string",
+       "removed": false
+      },
+      {
+       "id": "channel",
+       "displayName": "channel",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string",
+       "removed": false
+      }
+     ],
+     "attemptToConvertTypes": false,
+     "convertFieldsToString": false
+    },
+    "options": {
+     "waitForSubWorkflow": true
+    }
+   },
+   "onError": "continueRegularOutput"
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Tell failure",
+   "type": "n8n-nodes-base.executeWorkflow",
+   "typeVersion": 1.2,
+   "position": [
+    2000,
+    300
+   ],
+   "parameters": {
+    "source": "database",
+    "workflowId": {
+     "__rl": true,
+     "value": "__WF:Owner Message__",
+     "mode": "id"
+    },
+    "workflowInputs": {
+     "mappingMode": "defineBelow",
+     "value": {
+      "text": "={{ $json.text }}",
+      "channel": "={{ $json.channel }}"
+     },
+     "matchingColumns": [],
+     "schema": [
+      {
+       "id": "text",
+       "displayName": "text",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string",
+       "removed": false
+      },
+      {
+       "id": "channel",
+       "displayName": "channel",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string",
+       "removed": false
+      }
+     ],
+     "attemptToConvertTypes": false,
+     "convertFieldsToString": false
+    },
+    "options": {
+     "waitForSubWorkflow": true
+    }
+   },
+   "onError": "continueRegularOutput"
+  }
+ ],
+ "connections": {
+  "Called by workflow": {
+   "main": [
+    [
+     {
+      "node": "Input",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "From Paperless": {
+   "main": [
+    [
+     {
+      "node": "Input",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Input": {
+   "main": [
+    [
+     {
+      "node": "Get document",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Get document": {
+   "main": [
+    [
+     {
+      "node": "Get types",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Get types": {
+   "main": [
+    [
+     {
+      "node": "Image?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Image?": {
+   "main": [
+    [
+     {
+      "node": "Download image",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Render pages",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Download image": {
+   "main": [
+    [
+     {
+      "node": "Build request",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Build request": {
+   "main": [
+    [
+     {
+      "node": "Ask model",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Ask model": {
+   "main": [
+    [
+     {
+      "node": "Parse",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Fail info",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Parse": {
+   "main": [
+    [
+     {
+      "node": "Update document",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Update document": {
+   "main": [
+    [
+     {
+      "node": "Add note",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Add note": {
+   "main": [
+    [
+     {
+      "node": "Message",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Message": {
+   "main": [
+    [
+     {
+      "node": "Tell owner",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Remember": {
+   "main": [
+    [
+     {
+      "node": "Done",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Fail info": {
+   "main": [
+    [
+     {
+      "node": "Tell failure",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Render pages": {
+   "main": [
+    [
+     {
+      "node": "Build request",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Tell owner": {
+   "main": [
+    [
+     {
+      "node": "Remember",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ },
+ "settings": {
+  "timezone": "__JC_TZ__",
+  "executionOrder": "v1"
+ }
+}

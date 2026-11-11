@@ -1,0 +1,308 @@
+{
+ "name": "Watch Manager",
+ "nodes": [
+  {
+   "id": "__NEWID__",
+   "name": "Called by workflow",
+   "type": "n8n-nodes-base.executeWorkflowTrigger",
+   "typeVersion": 1.1,
+   "position": [
+    0,
+    0
+   ],
+   "parameters": {
+    "inputSource": "workflowInputs",
+    "workflowInputs": {
+     "values": [
+      {
+       "name": "action"
+      },
+      {
+       "name": "arg1"
+      },
+      {
+       "name": "arg2"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Validate",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    220,
+    0
+   ],
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "\nconst inp = $('Called by workflow').first().json;\nconst action = String(inp.action || '');\nlet spec = {};\ntry { spec = JSON.parse(inp.arg2 || '{}'); } catch (e) { spec = {}; }\nconst out = { action, id: parseInt(inp.arg1, 10) || 0, error: '' };\nif (action === 'watch_add') {\n  const urls = String(spec.urls || '').split(/[\\s,]+/).map(u => u.trim()).filter(Boolean)\n    .map(u => /^https?:\\/\\//i.test(u) ? u : 'https://' + u);\n  const channels = String(spec.channels || '__JC_CH_MAIN__').toLowerCase().split(/[\\s,]+/).filter(Boolean);\n  const bad = channels.filter(c => ![\"telegram\", \"email\", \"whatsapp\", \"call\", \"ai_call\"].includes(c));\n  const every = Math.round(Number(spec.every_hours || 3) * 60);\n  if (!urls.length) out.error = 'no URL given';\n  else if (urls.length > 5) out.error = 'at most 5 URLs per watch';\n  else if (!String(spec.criteria || '').trim()) out.error = 'criteria is empty';\n  else if (bad.length) out.error = 'unknown channel(s): ' + bad.join(', ') + '. allowed: ' + [\"telegram\", \"email\", \"whatsapp\", \"call\", \"ai_call\"].join(', ');\n  else if (!(every >= 60)) out.error = 'every_hours must be at least 1';\n  out.payload = Buffer.from(JSON.stringify({\n    name: String(spec.name || urls[0]).slice(0, 80), urls, criteria: String(spec.criteria || '').slice(0, 1000),\n    every_minutes: Math.min(every, 7 * 24 * 60), channels: [...new Set(channels)] }), 'utf8').toString('base64');\n} else if (action === 'watch_remove') {\n  if (!out.id) out.error = 'numeric watch id required (see list_watches)';\n} else if (action !== 'watch_list') {\n  out.error = 'unknown watch action';\n}\nreturn [{ json: out }];\n"
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "OK?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2.2,
+   "position": [
+    440,
+    0
+   ],
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "strict",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "c1",
+       "leftValue": "={{ $json.error === '' }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Which action",
+   "type": "n8n-nodes-base.switch",
+   "typeVersion": 3.2,
+   "position": [
+    660,
+    -100
+   ],
+   "parameters": {
+    "mode": "expression",
+    "numberOutputs": 3,
+    "output": "={{ ({watch_add: 0, watch_list: 1, watch_remove: 2})[$json.action] }}",
+    "options": {}
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Add",
+   "type": "n8n-nodes-base.postgres",
+   "typeVersion": 2.5,
+   "alwaysOutputData": true,
+   "position": [
+    880,
+    -240
+   ],
+   "parameters": {
+    "operation": "executeQuery",
+    "query": "INSERT INTO jc_watches (name, urls, criteria, every_minutes, channels)\nSELECT j->>'name', j->'urls', j->>'criteria', (j->>'every_minutes')::int, j->'channels'\nFROM (SELECT convert_from(decode($1, 'base64'), 'UTF8')::jsonb AS j) p\nRETURNING id, name, urls, criteria, every_minutes, channels, last_run, last_error;",
+    "options": {
+     "queryReplacement": "={{ $json.payload }}"
+    }
+   },
+   "credentials": {
+    "postgres": {
+     "id": "__CRED:Assistant database__",
+     "name": "Assistant database"
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "List",
+   "type": "n8n-nodes-base.postgres",
+   "typeVersion": 2.5,
+   "alwaysOutputData": true,
+   "position": [
+    880,
+    -100
+   ],
+   "parameters": {
+    "operation": "executeQuery",
+    "query": "SELECT id, name, urls, criteria, every_minutes, channels, to_char(last_run AT TIME ZONE '__JC_TZ__', 'YYYY-MM-DD HH24:MI') AS last_run, last_error\nFROM jc_watches WHERE active AND $1 = $1 ORDER BY id;",
+    "options": {
+     "queryReplacement": "={{ 'x' }}"
+    }
+   },
+   "credentials": {
+    "postgres": {
+     "id": "__CRED:Assistant database__",
+     "name": "Assistant database"
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Remove",
+   "type": "n8n-nodes-base.postgres",
+   "typeVersion": 2.5,
+   "alwaysOutputData": true,
+   "position": [
+    880,
+    40
+   ],
+   "parameters": {
+    "operation": "executeQuery",
+    "query": "UPDATE jc_watches SET active = false WHERE id = $1 AND active RETURNING id, name;",
+    "options": {
+     "queryReplacement": "={{ $json.id }}"
+    }
+   },
+   "credentials": {
+    "postgres": {
+     "id": "__CRED:Assistant database__",
+     "name": "Assistant database"
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Format",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1100,
+    -100
+   ],
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "\nconst rows = $input.all().map(i => i.json).filter(r => r.id);\nconst action = $('Validate').first().json.action;\nconst fmt = r => `#${r.id} ${r.name} | every ${Math.round(r.every_minutes / 60 * 10) / 10}h via ${(r.channels || []).join(', ')}`\n  + ` | ${(r.urls || []).join(' ')} | looking for: ${r.criteria}`\n  + (r.last_run ? ` | last check ${r.last_run}` : ' | not checked yet') + (r.last_error ? ` | last error: ${r.last_error}` : '');\nlet result;\nif (action === 'watch_add') result = rows.length ? 'saved watch ' + fmt(rows[0]) + '. The first check runs within 15 minutes; it only sends a short Telegram summary of what already matches, later checks alert on new matches via the chosen channels.' : 'ERROR: not saved';\nelse if (action === 'watch_remove') result = rows.length ? `removed watch #${rows[0].id} ${rows[0].name}` : 'ERROR: no watch with that id';\nelse result = rows.length ? rows.map(fmt).join('\\n') : 'no active watches';\nreturn [{ json: { result } }];\n"
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Error",
+   "type": "n8n-nodes-base.set",
+   "typeVersion": 3.4,
+   "position": [
+    660,
+    140
+   ],
+   "parameters": {
+    "mode": "manual",
+    "options": {},
+    "assignments": {
+     "assignments": [
+      {
+       "id": "r",
+       "name": "result",
+       "type": "string",
+       "value": "={{ 'ERROR: ' + $json.error }}"
+      }
+     ]
+    }
+   }
+  }
+ ],
+ "connections": {
+  "Called by workflow": {
+   "main": [
+    [
+     {
+      "node": "Validate",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Validate": {
+   "main": [
+    [
+     {
+      "node": "OK?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "OK?": {
+   "main": [
+    [
+     {
+      "node": "Which action",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Error",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Which action": {
+   "main": [
+    [
+     {
+      "node": "Add",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "List",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Remove",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Add": {
+   "main": [
+    [
+     {
+      "node": "Format",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "List": {
+   "main": [
+    [
+     {
+      "node": "Format",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Remove": {
+   "main": [
+    [
+     {
+      "node": "Format",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ },
+ "settings": {
+  "executionOrder": "v1"
+ }
+}

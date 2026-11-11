@@ -1,0 +1,152 @@
+{
+ "name": "Web Tools",
+ "nodes": [
+  {
+   "id": "__NEWID__",
+   "name": "Called by workflow",
+   "type": "n8n-nodes-base.executeWorkflowTrigger",
+   "typeVersion": 1.1,
+   "position": [
+    0,
+    0
+   ],
+   "parameters": {
+    "inputSource": "workflowInputs",
+    "workflowInputs": {
+     "values": [
+      {
+       "name": "action"
+      },
+      {
+       "name": "query"
+      },
+      {
+       "name": "url"
+      },
+      {
+       "name": "user_text"
+      },
+      {
+       "name": "exec_id"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Mark turn as web-tainted",
+   "type": "n8n-nodes-base.postgres",
+   "typeVersion": 2.5,
+   "alwaysOutputData": true,
+   "position": [
+    220,
+    0
+   ],
+   "parameters": {
+    "operation": "executeQuery",
+    "query": "DELETE FROM jc_web_taint WHERE ts < now() - interval '2 days';\nINSERT INTO jc_web_taint (exec_id) VALUES ($1) ON CONFLICT DO NOTHING RETURNING exec_id;",
+    "options": {
+     "queryReplacement": "={{ String($('Called by workflow').first().json.exec_id || 'missing') }}"
+    }
+   },
+   "credentials": {
+    "postgres": {
+     "id": "__CRED:Assistant database__",
+     "name": "Assistant database"
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Webtool",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "onError": "continueRegularOutput",
+   "position": [
+    440,
+    0
+   ],
+   "parameters": {
+    "method": "POST",
+    "url": "={{ '__JC_WEBTOOL_URL__/' + ($('Called by workflow').first().json.action === 'read' ? 'read' : 'search') }}",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify({ q: $('Called by workflow').first().json.query || '', url: $('Called by workflow').first().json.url || '', user_text: $('Called by workflow').first().json.user_text || '', exec_id: String($('Called by workflow').first().json.exec_id || '') }) }}",
+    "options": {
+     "timeout": 60000
+    }
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "__CRED:Webtool key__",
+     "name": "Webtool key"
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Result",
+   "type": "n8n-nodes-base.set",
+   "typeVersion": 3.4,
+   "position": [
+    660,
+    0
+   ],
+   "parameters": {
+    "mode": "manual",
+    "options": {},
+    "assignments": {
+     "assignments": [
+      {
+       "id": "r",
+       "name": "result",
+       "type": "string",
+       "value": "={{ $json.result || 'web tool error: the web service did not answer' }}"
+      }
+     ]
+    }
+   }
+  }
+ ],
+ "connections": {
+  "Called by workflow": {
+   "main": [
+    [
+     {
+      "node": "Mark turn as web-tainted",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Mark turn as web-tainted": {
+   "main": [
+    [
+     {
+      "node": "Webtool",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Webtool": {
+   "main": [
+    [
+     {
+      "node": "Result",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ },
+ "settings": {
+  "executionOrder": "v1"
+ }
+}

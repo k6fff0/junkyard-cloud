@@ -1,0 +1,76 @@
+{
+ "name": "PDF Tools",
+ "nodes": [
+  {
+   "id": "__NEWID__",
+   "name": "Called by workflow",
+   "type": "n8n-nodes-base.executeWorkflowTrigger",
+   "typeVersion": 1.1,
+   "position": [
+    0,
+    100
+   ],
+   "parameters": {
+    "inputSource": "workflowInputs",
+    "workflowInputs": {
+     "values": [
+      {
+       "name": "action"
+      },
+      {
+       "name": "arg1"
+      },
+      {
+       "name": "arg2"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Bridge tool",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    220,
+    100
+   ],
+   "parameters": {
+    "method": "POST",
+    "url": "__JC_FILEBRIDGE_URL__/tool",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify({ action: $json.action, arg1: $json.arg1, arg2: $json.arg2 }) }}",
+    "options": {
+     "timeout": 600000
+    }
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "__CRED:Filebridge key__",
+     "name": "Filebridge key"
+    }
+   }
+  }
+ ],
+ "connections": {
+  "Called by workflow": {
+   "main": [
+    [
+     {
+      "node": "Bridge tool",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ },
+ "settings": {
+  "timezone": "__JC_TZ__",
+  "executionOrder": "v1"
+ }
+}

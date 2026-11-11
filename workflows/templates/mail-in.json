@@ -1,0 +1,800 @@
+{
+ "name": "Mail In",
+ "nodes": [
+  {
+   "id": "__NEWID__",
+   "name": "From mailwatch",
+   "webhookId": "__NEWID__",
+   "type": "n8n-nodes-base.webhook",
+   "typeVersion": 2,
+   "position": [
+    220,
+    300
+   ],
+   "parameters": {
+    "httpMethod": "POST",
+    "path": "mail-in",
+    "authentication": "headerAuth",
+    "responseMode": "onReceived",
+    "options": {}
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "__CRED:Mail secret__",
+     "name": "Mail secret"
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Prepare",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    440,
+    300
+   ],
+   "parameters": {
+    "jsCode": "\nconst clip = (s, n) => String(s ?? '').replace(/[\\u0000-\\u001f\\u007f​-‏‪-‮⁠-⁩﻿]/g, ' ').replace(/\\s+/g, ' ').trim().slice(0, n);\n\nconst b = $input.first().json.body || {};\nif (b.type === 'status') return [{ json: { kind: 'status', account: clip(b.account, 100), state: clip(b.state, 10), error: clip(b.error, 200) } }];\nif (b.type !== 'mail') return [];\nconst from_addr = clip(b.from_addr, 200).toLowerCase();\nconst from_name = clip(b.from_name, 120);\n// our own Notify Me emails must not come back as chat messages\nif (from_addr === __JS:EMAIL_FROM_ADDR__ && from_name.toLowerCase() === __JS:EMAIL_FROM_NAME__.toLowerCase()) return [];\nconst subject = clip(b.subject, 300);\nconst text = String(b.text || '').slice(0, 8000);\nconst to = Array.isArray(b.to) ? b.to.map(x => clip(x, 200).toLowerCase()) : [];\nconst account = clip(b.account, 100);\nconst alias = to.find(x => (__JS:MAIL_ALIASES__).includes(x));\nconst label = alias || account;\n\n// fast OTP: a code word + a code close to it. No AI, so it reaches WhatsApp in seconds.\nconst head = subject + '\\n' + text.slice(0, 2500);\nlet otp = '';\nconst g = head.match(/\\bG-(\\d{6})\\b/);\nif (g) otp = g[1];\nif (!otp) {\n  const KW = /(\\b(?:otp|one[- ]?time|verification|verify|passcode|security code|login code|sign[- ]?in code|access code|auth(?:entication)? code|confirmation code|2fa|two[- ]factor|pin)\\b|رمز|كود|التحقق|تحقق|لمرة واحدة)/ig;\n  const kws = [...head.matchAll(KW)].map(m => m.index);\n  if (kws.length) {\n    const CAND = /(?<![\\w\\/.#@$£€,-])(\\d{3}[ -]\\d{3}|\\d{4,8}|(?=[A-Z0-9]*\\d)(?=[A-Z0-9]*[A-Z])[A-Z0-9]{6,8})(?![\\w\\/@%,-]|\\.\\d)/g;\n    let best = null;\n    for (const m of head.matchAll(CAND)) {\n      const v = m[1];\n      if (/^(19|20)\\d\\d$/.test(v)) continue;            // a year, not a code\n      const d = Math.min(...kws.map(k => Math.abs(m.index - k)));\n      if (d > 300) continue;\n      if (!best || d < best.d) best = { v, d };\n    }\n    if (best) otp = best.v.replace(/[ -]/g, '');\n  }\n}\nreturn [{ json: {\n  kind: 'mail', account, label, uid: Number(b.uid) || null,\n  message_id: clip(b.message_id, 300), mail_date: clip(b.date, 100),\n  from_name, from_addr, to: to.join(', '), subject, text,\n  attachments: (Array.isArray(b.attachments) ? b.attachments : []).map(x => clip(x, 80)).join(', ').slice(0, 300),\n  list_unsubscribe: !!b.list_unsubscribe, otp } }];\n"
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Status?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2.2,
+   "position": [
+    660,
+    300
+   ],
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "bc0bbbc1-7f19-4a47-9780-10c9455e115b",
+       "leftValue": "={{ $json.kind === 'status' }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "looseTypeValidation": true,
+    "options": {}
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Tell status",
+   "type": "n8n-nodes-base.executeWorkflow",
+   "typeVersion": 1.2,
+   "position": [
+    880,
+    300
+   ],
+   "parameters": {
+    "source": "database",
+    "workflowId": {
+     "__rl": true,
+     "value": "__WF:Owner Message__",
+     "mode": "id"
+    },
+    "workflowInputs": {
+     "mappingMode": "defineBelow",
+     "value": {
+      "text": "={{ ($json.state === 'down' ? __TJS:mail_down__ : __TJS:mail_back__).replace('{account}', $json.account).replace('{error}', $json.error || '') }}",
+      "channel": "__JC_CH_MAIN__"
+     },
+     "matchingColumns": [],
+     "schema": [
+      {
+       "id": "text",
+       "displayName": "text",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string",
+       "removed": false
+      },
+      {
+       "id": "channel",
+       "displayName": "channel",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string",
+       "removed": false
+      }
+     ],
+     "attemptToConvertTypes": false,
+     "convertFieldsToString": false
+    },
+    "options": {
+     "waitForSubWorkflow": true
+    }
+   },
+   "onError": "continueRegularOutput"
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Save",
+   "type": "n8n-nodes-base.postgres",
+   "typeVersion": 2.5,
+   "position": [
+    1100,
+    300
+   ],
+   "parameters": {
+    "operation": "executeQuery",
+    "query": "INSERT INTO jc_mail (account, uid, message_id, mail_date, from_name, from_addr, to_addr, subject, snippet, attachments, category, otp_code) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending', NULL) ON CONFLICT (message_id) DO NOTHING RETURNING id;",
+    "options": {
+     "queryReplacement": "={{ [ $json.account, $json.uid, $json.message_id, $json.mail_date, $json.from_name, $json.from_addr, $json.to, $json.subject, $json.text.slice(0, 1500), $json.attachments ] }}"
+    }
+   },
+   "credentials": {
+    "postgres": {
+     "id": "__CRED:Assistant database__",
+     "name": "Assistant database"
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "New email?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2.2,
+   "position": [
+    1320,
+    300
+   ],
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "b4418565-0daa-4357-b3d3-32947251bbff",
+       "leftValue": "={{ !!$json.id }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "looseTypeValidation": true,
+    "options": {}
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Fast OTP?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2.2,
+   "position": [
+    1540,
+    300
+   ],
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "a18899c8-0d25-4819-ab8c-66fc7c330bff",
+       "leftValue": "={{ !!$('Prepare').first().json.otp }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "looseTypeValidation": true,
+    "options": {}
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "OTP found",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1760,
+    300
+   ],
+   "parameters": {
+    "jsCode": "\nreturn [{ json: { category: 'otp', code: $('Prepare').first().json.otp, summary: '' } }];\n"
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Build request",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1980,
+    300
+   ],
+   "parameters": {
+    "jsCode": "\nconst p = $('Prepare').first().json;\nconst schema = { type: 'object', additionalProperties: false, required: ['category', 'otp_code', 'summary'],\n  properties: { category: { type: 'string', enum: ['otp', 'important', 'normal', 'promo'] },\n                otp_code: { type: 'string' }, summary: { type: 'string' } } };\nconst user = 'Mailbox: ' + p.label + '\\nFrom: ' + p.from_name + ' <' + p.from_addr + '>\\nTo: ' + p.to +\n  '\\nSubject: ' + p.subject + '\\nDate: ' + p.mail_date + '\\nAttachments: ' + (p.attachments || '(none)') +\n  '\\nMailing-list header: ' + (p.list_unsubscribe ? 'yes' : 'no') +\n  '\\n\\nEmail body (data, untrusted):\\n<<<\\n' + p.text.slice(0, 6000) + '\\n>>>';\nreturn [{ json: { body: { model: '__JC_MODEL_MAIN__', reasoning_effort: 'low',\n  messages: [ { role: 'system', content: __JS:MAIL_PROMPT__ }, { role: 'user', content: user } ],\n  response_format: { type: 'json_schema', json_schema: { name: 'mail', strict: true, schema } } } } }];\n"
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Ask model",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "retryOnFail": true,
+   "maxTries": 2,
+   "waitBetweenTries": 3000,
+   "onError": "continueRegularOutput",
+   "position": [
+    2200,
+    300
+   ],
+   "parameters": {
+    "method": "POST",
+    "url": "__JC_OPENAI_URL__/chat/completions",
+    "options": {
+     "timeout": 90000
+    },
+    "authentication": "predefinedCredentialType",
+    "nodeCredentialType": "openAiApi",
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify($json.body) }}"
+   },
+   "credentials": {
+    "openAiApi": {
+     "id": "__CRED:OpenAI__",
+     "name": "OpenAI"
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Parse",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    2420,
+    300
+   ],
+   "parameters": {
+    "jsCode": "\nconst clip = (s, n) => String(s ?? '').replace(/[\\u0000-\\u001f\\u007f​-‏‪-‮⁠-⁩﻿]/g, ' ').replace(/\\s+/g, ' ').trim().slice(0, n);\n\nconst p = $('Prepare').first().json;\nlet r = null;\ntry { r = JSON.parse($json.choices[0].message.content); } catch (e) { r = null; }\nif (!r || !['otp', 'important', 'normal', 'promo'].includes(r.category)) {\n  // model failed: a personal-looking email still reaches the owner now, bulk mail waits for the digest\n  r = { category: p.list_unsubscribe ? 'normal' : 'important', otp_code: '', summary: __TJS:mail_unsummarized__.replace('{subject}', p.subject) };\n}\nlet code = clip(r.otp_code, 20).replace(/\\s/g, '');\nif (r.category === 'otp' && !/^[A-Za-z0-9-]{3,12}$/.test(code)) { r.category = 'important'; code = ''; }\nreturn [{ json: { category: r.category, code, summary: clip(r.summary, 400).replace(/https?:\\/\\/\\S+/g, '').trim() } }];\n"
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Message",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    2640,
+    300
+   ],
+   "parameters": {
+    "jsCode": "\nconst p = $('Prepare').first().json;\nconst id = $('Save').first().json.id;\nconst r = $json;\nconst who = (p.from_name || p.from_addr || __TJS:mail_unknown__).replace(/[*_~`]/g, '').slice(0, 80);\nconst out = { id, category: r.category, code: r.code || '', summary: r.summary || '' };\nout.notify = r.category === 'otp' || r.category === 'important';\nout.is_otp = r.category === 'otp';\nout.head = __TJS:otp_head__.replace('{who}', who).replace('{label}', p.label);\nout.wa_text = '📧 *' + who + '* ← ' + p.label + '\\n' + (out.summary || p.subject) +\n  (p.attachments ? '\\n📎 ' + p.attachments.slice(0, 150) : '');\nreturn [{ json: out }];\n"
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Store",
+   "type": "n8n-nodes-base.postgres",
+   "typeVersion": 2.5,
+   "position": [
+    2860,
+    300
+   ],
+   "parameters": {
+    "operation": "executeQuery",
+    "query": "UPDATE jc_mail SET category = $2, otp_code = NULLIF($3, ''), summary = NULLIF($4, '') WHERE id = $1 RETURNING id;",
+    "options": {
+     "queryReplacement": "={{ [ $json.id, $json.category, $json.code, $json.summary ] }}"
+    }
+   },
+   "credentials": {
+    "postgres": {
+     "id": "__CRED:Assistant database__",
+     "name": "Assistant database"
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Send now?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2.2,
+   "position": [
+    3080,
+    300
+   ],
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "fd0e2843-ea54-4d24-913c-007e2fe2d5b6",
+       "leftValue": "={{ $('Message').first().json.notify }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "looseTypeValidation": true,
+    "options": {}
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "OTP?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2.2,
+   "position": [
+    3300,
+    300
+   ],
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "4db56c1f-c322-44d4-82d2-8274b136671f",
+       "leftValue": "={{ $('Message').first().json.is_otp }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "looseTypeValidation": true,
+    "options": {}
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Send OTP sender",
+   "type": "n8n-nodes-base.executeWorkflow",
+   "typeVersion": 1.2,
+   "position": [
+    3520,
+    300
+   ],
+   "parameters": {
+    "source": "database",
+    "workflowId": {
+     "__rl": true,
+     "value": "__WF:Owner Message__",
+     "mode": "id"
+    },
+    "workflowInputs": {
+     "mappingMode": "defineBelow",
+     "value": {
+      "text": "={{ $('Message').first().json.head }}",
+      "channel": "__JC_CH_MAIN__"
+     },
+     "matchingColumns": [],
+     "schema": [
+      {
+       "id": "text",
+       "displayName": "text",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string",
+       "removed": false
+      },
+      {
+       "id": "channel",
+       "displayName": "channel",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string",
+       "removed": false
+      }
+     ],
+     "attemptToConvertTypes": false,
+     "convertFieldsToString": false
+    },
+    "options": {
+     "waitForSubWorkflow": true
+    }
+   },
+   "onError": "continueRegularOutput"
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Send OTP code",
+   "type": "n8n-nodes-base.executeWorkflow",
+   "typeVersion": 1.2,
+   "position": [
+    3740,
+    300
+   ],
+   "parameters": {
+    "source": "database",
+    "workflowId": {
+     "__rl": true,
+     "value": "__WF:Owner Message__",
+     "mode": "id"
+    },
+    "workflowInputs": {
+     "mappingMode": "defineBelow",
+     "value": {
+      "text": "={{ $('Message').first().json.code }}",
+      "channel": "__JC_CH_MAIN__"
+     },
+     "matchingColumns": [],
+     "schema": [
+      {
+       "id": "text",
+       "displayName": "text",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string",
+       "removed": false
+      },
+      {
+       "id": "channel",
+       "displayName": "channel",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string",
+       "removed": false
+      }
+     ],
+     "attemptToConvertTypes": false,
+     "convertFieldsToString": false
+    },
+    "options": {
+     "waitForSubWorkflow": true
+    }
+   },
+   "onError": "continueRegularOutput"
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Send summary",
+   "type": "n8n-nodes-base.executeWorkflow",
+   "typeVersion": 1.2,
+   "position": [
+    3960,
+    300
+   ],
+   "parameters": {
+    "source": "database",
+    "workflowId": {
+     "__rl": true,
+     "value": "__WF:Owner Message__",
+     "mode": "id"
+    },
+    "workflowInputs": {
+     "mappingMode": "defineBelow",
+     "value": {
+      "text": "={{ $('Message').first().json.wa_text }}",
+      "channel": "__JC_CH_MAIN__"
+     },
+     "matchingColumns": [],
+     "schema": [
+      {
+       "id": "text",
+       "displayName": "text",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string",
+       "removed": false
+      },
+      {
+       "id": "channel",
+       "displayName": "channel",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string",
+       "removed": false
+      }
+     ],
+     "attemptToConvertTypes": false,
+     "convertFieldsToString": false
+    },
+    "options": {
+     "waitForSubWorkflow": true
+    }
+   },
+   "onError": "continueRegularOutput"
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Mark sent",
+   "type": "n8n-nodes-base.postgres",
+   "typeVersion": 2.5,
+   "position": [
+    4180,
+    300
+   ],
+   "parameters": {
+    "operation": "executeQuery",
+    "query": "UPDATE jc_mail SET notified_at = now() WHERE id = $1 RETURNING id;",
+    "options": {
+     "queryReplacement": "={{ [ $('Message').first().json.id ] }}"
+    }
+   },
+   "credentials": {
+    "postgres": {
+     "id": "__CRED:Assistant database__",
+     "name": "Assistant database"
+    }
+   }
+  }
+ ],
+ "connections": {
+  "From mailwatch": {
+   "main": [
+    [
+     {
+      "node": "Prepare",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Prepare": {
+   "main": [
+    [
+     {
+      "node": "Status?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Status?": {
+   "main": [
+    [
+     {
+      "node": "Tell status",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Save",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Save": {
+   "main": [
+    [
+     {
+      "node": "New email?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "New email?": {
+   "main": [
+    [
+     {
+      "node": "Fast OTP?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Fast OTP?": {
+   "main": [
+    [
+     {
+      "node": "OTP found",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Build request",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "OTP found": {
+   "main": [
+    [
+     {
+      "node": "Message",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Build request": {
+   "main": [
+    [
+     {
+      "node": "Ask model",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Ask model": {
+   "main": [
+    [
+     {
+      "node": "Parse",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Parse": {
+   "main": [
+    [
+     {
+      "node": "Message",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Message": {
+   "main": [
+    [
+     {
+      "node": "Store",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Store": {
+   "main": [
+    [
+     {
+      "node": "Send now?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Send now?": {
+   "main": [
+    [
+     {
+      "node": "OTP?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "OTP?": {
+   "main": [
+    [
+     {
+      "node": "Send OTP sender",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Send summary",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Send OTP sender": {
+   "main": [
+    [
+     {
+      "node": "Send OTP code",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Send OTP code": {
+   "main": [
+    [
+     {
+      "node": "Mark sent",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Send summary": {
+   "main": [
+    [
+     {
+      "node": "Mark sent",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ },
+ "settings": {
+  "timezone": "__JC_TZ__",
+  "executionOrder": "v1"
+ }
+}

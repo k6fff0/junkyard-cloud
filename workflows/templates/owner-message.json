@@ -1,0 +1,133 @@
+{
+ "name": "Owner Message",
+ "nodes": [
+  {
+   "id": "__NEWID__",
+   "name": "Called by workflow",
+   "type": "n8n-nodes-base.executeWorkflowTrigger",
+   "typeVersion": 1.1,
+   "position": [
+    0,
+    0
+   ],
+   "parameters": {
+    "inputSource": "workflowInputs",
+    "workflowInputs": {
+     "values": [
+      {
+       "name": "text"
+      },
+      {
+       "name": "channel"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Which chat",
+   "type": "n8n-nodes-base.switch",
+   "typeVersion": 3.2,
+   "position": [
+    220,
+    0
+   ],
+   "parameters": {
+    "mode": "expression",
+    "numberOutputs": 2,
+    "options": {},
+    "output": "={{ (() => { const c = String($json.channel || '').toLowerCase(); const on = __JS:CHAT_CHANNELS__; const pick = on.includes(c) ? c : '__JC_CH_MAIN__'; return pick === 'whatsapp' ? 0 : 1; })() }}"
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "WhatsApp",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    440,
+    -100
+   ],
+   "onError": "continueRegularOutput",
+   "parameters": {
+    "method": "POST",
+    "url": "__JC_WAHA_URL__/api/sendText",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify({ session: '__JC_WA_SESSION__', chatId: '__JC_WA_CHAT__', text: String($json.text || '').slice(0, 6000) }) }}",
+    "options": {
+     "timeout": 60000
+    }
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "__CRED:WAHA key__",
+     "name": "WAHA key"
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Telegram",
+   "type": "n8n-nodes-base.telegram",
+   "typeVersion": 1.2,
+   "position": [
+    440,
+    100
+   ],
+   "onError": "continueRegularOutput",
+   "parameters": {
+    "resource": "message",
+    "operation": "sendMessage",
+    "chatId": "__JC_TG_CHAT__",
+    "text": "={{ String($json.text || '').replace(/[*_`]/g, '').slice(0, 4000) }}",
+    "additionalFields": {
+     "appendAttribution": false
+    }
+   },
+   "credentials": {
+    "telegramApi": {
+     "id": "__CRED:Telegram bot__",
+     "name": "Telegram bot"
+    }
+   }
+  }
+ ],
+ "connections": {
+  "Called by workflow": {
+   "main": [
+    [
+     {
+      "node": "Which chat",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Which chat": {
+   "main": [
+    [
+     {
+      "node": "WhatsApp",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Telegram",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ },
+ "settings": {
+  "executionOrder": "v1"
+ }
+}

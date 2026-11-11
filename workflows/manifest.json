@@ -1,0 +1,32 @@
+{
+  "_about": "Which workflows and nodes belong to each optional module. A module that is off removes its workflows, its nodes in shared workflows and its sections in the prompts. core is always on.",
+  "modules": {
+    "core": {"requires": [], "workflows": ["Owner Message", "Notify Me", "Server Ops", "Guarded Action", "Assistant", "Notes", "Model Health"]},
+    "whatsapp": {"requires": [], "workflows": ["WhatsApp In"],
+                 "nodes": {"Owner Message": ["WhatsApp"], "Notify Me": ["WhatsApp?", "WhatsApp"]}},
+    "telegram": {"requires": [], "workflows": ["Telegram Files"],
+                 "nodes": {"Assistant": ["Telegram Trigger", "File or photo?", "Telegram Files", "Voice note?", "Get voice file",
+                                         "Rename to ogg", "Transcribe", "From voice note", "From text", "Reply on Telegram"],
+                           "Owner Message": ["Telegram"], "Notify Me": ["Telegram?", "Telegram"]}},
+    "email": {"requires": [], "nodes": {"Notify Me": ["Email?", "Email"]}},
+    "calls": {"requires": [], "workflows": ["Voice Call (AI)"],
+              "nodes": {"Assistant": ["voice_call_me"], "Guarded Action": ["Voice Call (AI)"],
+                        "Notify Me": ["Call?", "Phone call", "AI call?", "AI call"]}},
+    "web": {"requires": [], "workflows": ["Web Tools", "Watch Manager", "Watch Runner"],
+            "nodes": {"Assistant": ["web_search", "web_read", "add_watch", "list_watches", "remove_watch"],
+                      "Guarded Action": ["Watch Manager"]}},
+    "files": {"requires": [], "workflows": ["PDF Tools"],
+              "nodes": {"Assistant": ["pdf_operations", "recent_files", "pdf_run", "look_at_file"], "Guarded Action": ["PDF Tools"]}},
+    "archive": {"requires": ["files"], "workflows": ["Docs Process", "Docs Tools", "Docs Expiry"],
+                "nodes": {"Assistant": ["find_documents", "send_document", "update_document", "save_to_archive"],
+                          "Guarded Action": ["Docs Tools"]}},
+    "links": {"requires": [], "workflows": ["Links"],
+              "nodes": {"Assistant": ["save_link", "search_links", "recent_links"], "Guarded Action": ["Links"]}},
+    "downloads": {"requires": [], "workflows": ["Downloads"],
+                  "nodes": {"Assistant": ["download_file", "list_downloads", "control_download", "downloads_space"],
+                            "Guarded Action": ["Downloads"]}},
+    "mail": {"requires": [], "workflows": ["Mail In", "Mail Digest"]},
+    "uptime": {"requires": [], "workflows": ["Uptime Alerts"]}
+  },
+  "always_with_core": {"Assistant": ["add_note", "search_notes", "update_note", "delete_note"]}
+}

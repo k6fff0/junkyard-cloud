@@ -1,0 +1,209 @@
+{
+ "name": "Docs Expiry",
+ "nodes": [
+  {
+   "id": "__NEWID__",
+   "name": "Every day 09:00",
+   "type": "n8n-nodes-base.scheduleTrigger",
+   "typeVersion": 1.2,
+   "position": [
+    0,
+    0
+   ],
+   "parameters": {
+    "rule": {
+     "interval": [
+      {
+       "field": "cronExpression",
+       "expression": "0 9 * * *"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Documents",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    220,
+    0
+   ],
+   "parameters": {
+    "method": "GET",
+    "url": "__JC_PAPERLESS_URL__/api/documents/?page_size=1000&fields=id,title,document_type,custom_fields&custom_field_query=%5B__JC_EXPIRY_FIELD__%2C%20%22exists%22%2C%20true%5D",
+    "options": {},
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth"
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "__CRED:Paperless token__",
+     "name": "Paperless token"
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Types",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    440,
+    0
+   ],
+   "parameters": {
+    "method": "GET",
+    "url": "__JC_PAPERLESS_URL__/api/document_types/?page_size=100",
+    "options": {},
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth"
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "__CRED:Paperless token__",
+     "name": "Paperless token"
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Due today?",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    660,
+    0
+   ],
+   "parameters": {
+    "jsCode": "const fill = (s, o) => s.replace(/\\{(\\w+)\\}/g, (_, k) => (k in o ? String(o[k]) : ''));\nconst DAYS = __JS:DAYS__;\nconst days = n => (DAYS[new Intl.PluralRules('__JC_LANG__').select(n)] || DAYS.other).replace('{n}', n);\nconst clean = s => String(s || '').replace(/[\\u0000-\\u001f\\u007f\\u200b-\\u200f\\u202a-\\u202e\\u2066-\\u2069]/g, ' ').replace(/\\s+/g, ' ').trim();\nconst types = Object.fromEntries($('Types').first().json.results.map(t => [t.id, t.name]));\nconst today = $now.setZone('__JC_TZ__').startOf('day');\nconst hits = [];\nfor (const d of $('Documents').first().json.results || []) {\n  const f = (d.custom_fields || []).find(x => x.field === __JC_EXPIRY_FIELD__);\n  if (!f || !f.value) continue;\n  const n = Math.round(DateTime.fromISO(f.value, { zone: '__JC_TZ__' }).diff(today, 'days').days);\n  if ([30, 7, 1, 0].includes(n)) hits.push({ n, line: (n === 0 ? __TJS:expiry_today__ : n === 1 ? __TJS:expiry_tomorrow__ :\n    fill(__TJS:expiry_days__, { days: days(n) })) + clean(d.title) + ' (' + (types[d.document_type] || '') + ') - ' + f.value +\n    '\\n__JC_DOCS_URL__/documents/' + d.id + '/details' });\n}\nif (!hits.length) return [];\nhits.sort((a, b) => a.n - b.n);\nreturn [{ json: { title: __TJS:expiry_title__, message: hits.map(h => h.line).join('\\n\\n'),\n  priority: hits.some(h => h.n <= 1) ? 'important' : 'normal' } }];\n"
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Notify Me",
+   "type": "n8n-nodes-base.executeWorkflow",
+   "typeVersion": 1.2,
+   "position": [
+    880,
+    0
+   ],
+   "parameters": {
+    "source": "database",
+    "workflowId": {
+     "__rl": true,
+     "value": "__WF:Notify Me__",
+     "mode": "id"
+    },
+    "workflowInputs": {
+     "mappingMode": "defineBelow",
+     "value": {
+      "title": "={{ $json.title }}",
+      "message": "={{ $json.message }}",
+      "priority": "={{ $json.priority }}",
+      "channels": ""
+     },
+     "matchingColumns": [],
+     "schema": [
+      {
+       "id": "title",
+       "displayName": "title",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string",
+       "removed": false
+      },
+      {
+       "id": "message",
+       "displayName": "message",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string",
+       "removed": false
+      },
+      {
+       "id": "priority",
+       "displayName": "priority",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string",
+       "removed": false
+      },
+      {
+       "id": "channels",
+       "displayName": "channels",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string",
+       "removed": false
+      }
+     ],
+     "attemptToConvertTypes": false,
+     "convertFieldsToString": false
+    },
+    "options": {
+     "waitForSubWorkflow": true
+    }
+   }
+  }
+ ],
+ "connections": {
+  "Every day 09:00": {
+   "main": [
+    [
+     {
+      "node": "Documents",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Documents": {
+   "main": [
+    [
+     {
+      "node": "Types",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Types": {
+   "main": [
+    [
+     {
+      "node": "Due today?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Due today?": {
+   "main": [
+    [
+     {
+      "node": "Notify Me",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ },
+ "settings": {
+  "timezone": "__JC_TZ__",
+  "executionOrder": "v1"
+ }
+}

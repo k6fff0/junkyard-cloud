@@ -1,0 +1,107 @@
+{
+ "name": "Voice Call (AI)",
+ "nodes": [
+  {
+   "id": "__NEWID__",
+   "name": "Called by workflow",
+   "type": "n8n-nodes-base.executeWorkflowTrigger",
+   "typeVersion": 1.1,
+   "position": [
+    0,
+    0
+   ],
+   "parameters": {
+    "inputSource": "workflowInputs",
+    "workflowInputs": {
+     "values": [
+      {
+       "name": "context"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Call and connect to voice bridge",
+   "type": "n8n-nodes-base.twilio",
+   "typeVersion": 1,
+   "position": [
+    240,
+    0
+   ],
+   "parameters": {
+    "resource": "call",
+    "operation": "make",
+    "from": "__JC_TWILIO_FROM__",
+    "to": "__JC_OWNER_PHONE__",
+    "twiml": true,
+    "message": "={{ '<Response><Connect><Stream url=\"__JC_VOICE_STREAM_URL__\"><Parameter name=\"context\" value=\"' + ($json.context || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;') + '\"/></Stream></Connect></Response>' }}",
+    "options": {}
+   },
+   "credentials": {
+    "twilioApi": {
+     "id": "__CRED:Twilio__",
+     "name": "Twilio"
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Result",
+   "type": "n8n-nodes-base.set",
+   "typeVersion": 3.4,
+   "position": [
+    480,
+    0
+   ],
+   "parameters": {
+    "mode": "manual",
+    "assignments": {
+     "assignments": [
+      {
+       "id": "o",
+       "name": "ok",
+       "type": "boolean",
+       "value": true
+      },
+      {
+       "id": "s",
+       "name": "call_status",
+       "type": "string",
+       "value": "={{ $json.status }}"
+      }
+     ]
+    },
+    "options": {}
+   }
+  }
+ ],
+ "connections": {
+  "Called by workflow": {
+   "main": [
+    [
+     {
+      "node": "Call and connect to voice bridge",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Call and connect to voice bridge": {
+   "main": [
+    [
+     {
+      "node": "Result",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ },
+ "settings": {
+  "executionOrder": "v1"
+ }
+}

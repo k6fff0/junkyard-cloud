@@ -1,0 +1,609 @@
+{
+ "name": "Notify Me",
+ "nodes": [
+  {
+   "id": "__NEWID__",
+   "name": "Called by workflow",
+   "type": "n8n-nodes-base.executeWorkflowTrigger",
+   "typeVersion": 1.1,
+   "position": [
+    0,
+    0
+   ],
+   "parameters": {
+    "inputSource": "workflowInputs",
+    "workflowInputs": {
+     "values": [
+      {
+       "name": "title"
+      },
+      {
+       "name": "message"
+      },
+      {
+       "name": "priority"
+      },
+      {
+       "name": "channels"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Called by server script",
+   "webhookId": "__NEWID__",
+   "type": "n8n-nodes-base.webhook",
+   "typeVersion": 2,
+   "position": [
+    0,
+    220
+   ],
+   "parameters": {
+    "httpMethod": "POST",
+    "path": "notify",
+    "authentication": "headerAuth",
+    "responseMode": "onReceived",
+    "options": {}
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "__CRED:Notify secret__",
+     "name": "Notify secret"
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Normalize",
+   "type": "n8n-nodes-base.set",
+   "typeVersion": 3.4,
+   "position": [
+    220,
+    0
+   ],
+   "parameters": {
+    "mode": "manual",
+    "assignments": {
+     "assignments": [
+      {
+       "id": "t",
+       "name": "title",
+       "type": "string",
+       "value": "={{ $json.body ? $json.body.title : $json.title }}"
+      },
+      {
+       "id": "m",
+       "name": "message",
+       "type": "string",
+       "value": "={{ $json.body ? $json.body.message : $json.message }}"
+      },
+      {
+       "id": "p",
+       "name": "priority",
+       "type": "string",
+       "value": "={{ ($json.body ? $json.body.priority : $json.priority) || 'normal' }}"
+      },
+      {
+       "id": "c",
+       "name": "channels",
+       "type": "array",
+       "value": "={{ (() => { const allowed = __JS:CHANNELS__; const raw = ($json.body || $json).channels; const list = (Array.isArray(raw) ? raw : String(raw || '').split(/[\\s,]+/)).map(c => String(c).trim().toLowerCase()).filter(c => allowed.includes(c)); if (list.length) return [...new Set(list)]; const p = ($json.body || $json).priority || 'normal'; const by = __JS:PRIORITY_CHANNELS__; return by[p] || by.normal; })() }}"
+      }
+     ]
+    },
+    "options": {}
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Telegram",
+   "webhookId": "__NEWID__",
+   "type": "n8n-nodes-base.telegram",
+   "typeVersion": 1.2,
+   "onError": "continueRegularOutput",
+   "position": [
+    700,
+    -200
+   ],
+   "parameters": {
+    "resource": "message",
+    "operation": "sendMessage",
+    "chatId": "__JC_TG_CHAT__",
+    "text": "={{ ({normal: '🔔', important: '⚠️', emergency: '🚨'})[$json.priority || 'normal'] || '🔔' }} {{ $json.title || __TJS:alert_title__ }}\n\n{{ $json.message }}",
+    "additionalFields": {
+     "appendAttribution": false
+    }
+   },
+   "credentials": {
+    "telegramApi": {
+     "id": "__CRED:Telegram bot__",
+     "name": "Telegram bot"
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Email",
+   "webhookId": "__NEWID__",
+   "type": "n8n-nodes-base.emailSend",
+   "typeVersion": 2.1,
+   "onError": "continueRegularOutput",
+   "position": [
+    700,
+    0
+   ],
+   "parameters": {
+    "fromEmail": "__JC_EMAIL_FROM__",
+    "toEmail": "__JC_EMAIL_TO__",
+    "subject": "={{ ({normal: '🔔', important: '⚠️', emergency: '🚨'})[$json.priority || 'normal'] || '🔔' }} {{ $json.title || __TJS:alert_title__ }}",
+    "emailFormat": "text",
+    "text": "={{ $json.message }}",
+    "options": {
+     "appendAttribution": false
+    }
+   },
+   "credentials": {
+    "smtp": {
+     "id": "__CRED:SMTP__",
+     "name": "SMTP"
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Phone call",
+   "type": "n8n-nodes-base.twilio",
+   "typeVersion": 1,
+   "onError": "continueRegularOutput",
+   "position": [
+    700,
+    400
+   ],
+   "parameters": {
+    "resource": "call",
+    "operation": "make",
+    "from": "__JC_TWILIO_FROM__",
+    "to": "__JC_OWNER_PHONE__",
+    "twiml": true,
+    "message": "={{ '<Response><Pause length=\"1\"/>' + '<Say language=\"__JC_TTS_LANG__\" voice=\"__JC_TTS_VOICE__\">' + (($json.title || __TJS:alert_title__) + '. ' + ($json.message || '')).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</Say>' + '<Pause length=\"1\"/>' + '<Say language=\"__JC_TTS_LANG__\" voice=\"__JC_TTS_VOICE__\">' + (($json.title || __TJS:alert_title__) + '. ' + ($json.message || '')).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</Say>' + '</Response>' }}",
+    "options": {}
+   },
+   "credentials": {
+    "twilioApi": {
+     "id": "__CRED:Twilio__",
+     "name": "Twilio"
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "WhatsApp",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "onError": "continueRegularOutput",
+   "position": [
+    700,
+    200
+   ],
+   "parameters": {
+    "method": "POST",
+    "url": "__JC_WAHA_URL__/api/sendText",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify({ session: '__JC_WA_SESSION__', chatId: '__JC_WA_CHAT__', text: (({normal: '🔔', important: '⚠️', emergency: '🚨'})[$json.priority || 'normal'] || '🔔') + ' *' + ($json.title || __TJS:alert_title__) + '*\\n\\n' + ($json.message || '') }) }}",
+    "options": {}
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "__CRED:WAHA key__",
+     "name": "WAHA key"
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Result",
+   "type": "n8n-nodes-base.set",
+   "typeVersion": 3.4,
+   "position": [
+    440,
+    800
+   ],
+   "parameters": {
+    "mode": "manual",
+    "assignments": {
+     "assignments": [
+      {
+       "id": "o",
+       "name": "ok",
+       "type": "boolean",
+       "value": true
+      },
+      {
+       "id": "p",
+       "name": "sent_with_priority",
+       "type": "string",
+       "value": "={{ $(\"Normalize\").first().json.priority }}"
+      },
+      {
+       "id": "c",
+       "name": "channels",
+       "type": "string",
+       "value": "={{ $(\"Normalize\").first().json.channels.join(', ') }}"
+      }
+     ]
+    },
+    "options": {}
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Telegram?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2.2,
+   "position": [
+    440,
+    -200
+   ],
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "strict",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "c1",
+       "leftValue": "={{ $json.channels.includes('telegram') }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Email?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2.2,
+   "position": [
+    440,
+    0
+   ],
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "strict",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "c1",
+       "leftValue": "={{ $json.channels.includes('email') }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "WhatsApp?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2.2,
+   "position": [
+    440,
+    200
+   ],
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "strict",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "c1",
+       "leftValue": "={{ $json.channels.includes('whatsapp') }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Call?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2.2,
+   "position": [
+    440,
+    400
+   ],
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "strict",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "c1",
+       "leftValue": "={{ $json.channels.includes('call') }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "AI call?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2.2,
+   "position": [
+    440,
+    600
+   ],
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "strict",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "c1",
+       "leftValue": "={{ $json.channels.includes('ai_call') }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "AI call",
+   "type": "n8n-nodes-base.executeWorkflow",
+   "typeVersion": 1.2,
+   "onError": "continueRegularOutput",
+   "position": [
+    700,
+    600
+   ],
+   "parameters": {
+    "source": "database",
+    "workflowId": {
+     "__rl": true,
+     "value": "__WF:Voice Call (AI)__",
+     "mode": "id"
+    },
+    "workflowInputs": {
+     "mappingMode": "defineBelow",
+     "value": {
+      "context": "={{ ($json.title ? $json.title + '. ' : '') + ($json.message || '') }}"
+     },
+     "matchingColumns": [],
+     "schema": [
+      {
+       "id": "context",
+       "displayName": "context",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string",
+       "removed": false
+      }
+     ],
+     "attemptToConvertTypes": false,
+     "convertFieldsToString": false
+    },
+    "options": {
+     "waitForSubWorkflow": true
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Remember",
+   "type": "n8n-nodes-base.postgres",
+   "typeVersion": 2.5,
+   "onError": "continueRegularOutput",
+   "position": [
+    440,
+    600
+   ],
+   "parameters": {
+    "operation": "executeQuery",
+    "query": "INSERT INTO jc_assistant_memory (session_id, message) VALUES ('owner', $1::jsonb);",
+    "options": {
+     "queryReplacement": "={{ [ JSON.stringify({ type: 'ai', content: '[Notification sent to __JC_OWNER_CALL__ by the server on ' + $json.channels.join(', ') + ' at ' + $now.setZone('__JC_TZ__').toFormat('yyyy-MM-dd HH:mm') + ']: ' + String($json.title || '').slice(0, 200) + ' | ' + String($json.message || '').slice(0, 600), tool_calls: [], additional_kwargs: {}, response_metadata: {}, invalid_tool_calls: [] }) ] }}"
+    }
+   },
+   "credentials": {
+    "postgres": {
+     "id": "__CRED:Assistant database__",
+     "name": "Assistant database"
+    }
+   }
+  }
+ ],
+ "connections": {
+  "Called by workflow": {
+   "main": [
+    [
+     {
+      "node": "Normalize",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Called by server script": {
+   "main": [
+    [
+     {
+      "node": "Normalize",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Normalize": {
+   "main": [
+    [
+     {
+      "node": "Remember",
+      "type": "main",
+      "index": 0
+     },
+     {
+      "node": "Telegram?",
+      "type": "main",
+      "index": 0
+     },
+     {
+      "node": "Email?",
+      "type": "main",
+      "index": 0
+     },
+     {
+      "node": "WhatsApp?",
+      "type": "main",
+      "index": 0
+     },
+     {
+      "node": "Call?",
+      "type": "main",
+      "index": 0
+     },
+     {
+      "node": "AI call?",
+      "type": "main",
+      "index": 0
+     },
+     {
+      "node": "Result",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Telegram?": {
+   "main": [
+    [
+     {
+      "node": "Telegram",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    []
+   ]
+  },
+  "Email?": {
+   "main": [
+    [
+     {
+      "node": "Email",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    []
+   ]
+  },
+  "WhatsApp?": {
+   "main": [
+    [
+     {
+      "node": "WhatsApp",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    []
+   ]
+  },
+  "Call?": {
+   "main": [
+    [
+     {
+      "node": "Phone call",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    []
+   ]
+  },
+  "AI call?": {
+   "main": [
+    [
+     {
+      "node": "AI call",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    []
+   ]
+  }
+ },
+ "settings": {
+  "executionOrder": "v1"
+ }
+}

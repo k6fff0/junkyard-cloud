@@ -1,0 +1,187 @@
+{
+ "name": "Model Health",
+ "nodes": [
+  {
+   "id": "__NEWID__",
+   "name": "Every 3 hours",
+   "type": "n8n-nodes-base.scheduleTrigger",
+   "typeVersion": 1.2,
+   "position": [
+    0,
+    0
+   ],
+   "parameters": {
+    "rule": {
+     "interval": [
+      {
+       "field": "cronExpression",
+       "expression": "17 */3 * * *"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Ping model",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "onError": "continueRegularOutput",
+   "position": [
+    220,
+    0
+   ],
+   "parameters": {
+    "method": "POST",
+    "url": "__JC_OPENAI_URL__/chat/completions",
+    "authentication": "predefinedCredentialType",
+    "nodeCredentialType": "openAiApi",
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify({ model: '__JC_MODEL_SMALL__', reasoning_effort: 'low', max_completion_tokens: 64, messages: [{ role: 'user', content: 'Reply with OK.' }] }) }}",
+    "options": {
+     "timeout": 60000,
+     "response": {
+      "response": {
+       "fullResponse": true,
+       "neverError": true
+      }
+     }
+    }
+   },
+   "credentials": {
+    "openAiApi": {
+     "id": "__CRED:OpenAI__",
+     "name": "OpenAI"
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Changed?",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    440,
+    0
+   ],
+   "parameters": {
+    "jsCode": "const fill = (s, o) => s.replace(/\\{(\\w+)\\}/g, (_, k) => (k in o ? String(o[k]) : ''));\nconst r = $input.first().json;\nconst code = r.statusCode || 0;\nconst ok = code === 200;\nconst body = typeof r.body === 'string' ? r.body : JSON.stringify(r.body || r.error || r);\nconst quota = /insufficient_quota|exceeded your current quota|billing/i.test(body);\nconst sd = $getWorkflowStaticData('global');\nconst before = sd.ok;            // undefined on the first run\nsd.ok = ok;\nif (before === undefined && ok) return [];\nif (before === ok) return [];\nconst A = { assistant: __JS:ASSISTANT__ };\nif (ok) return [{ json: { title: __TJS:health_back_title__, message: fill(__TJS:health_back_msg__, A), channels: '__JC_CH_IMPORTANT__' } }];\nreturn [{ json: { title: __TJS:health_down_title__,\n  message: (quota ? __TJS:health_quota__ : fill(__TJS:health_noreply__, { code })) + fill(__TJS:health_stops__, A) +\n    __TJS:health_works__ + __TJS:health_reply__ + body.slice(0, 200),\n  channels: '__JC_CH_ALL_TEXT__' } }];\n"
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Notify Me",
+   "type": "n8n-nodes-base.executeWorkflow",
+   "typeVersion": 1.2,
+   "position": [
+    660,
+    0
+   ],
+   "parameters": {
+    "source": "database",
+    "workflowId": {
+     "__rl": true,
+     "value": "__WF:Notify Me__",
+     "mode": "id"
+    },
+    "workflowInputs": {
+     "mappingMode": "defineBelow",
+     "value": {
+      "title": "={{ $json.title }}",
+      "message": "={{ $json.message }}",
+      "priority": "important",
+      "channels": "={{ $json.channels }}"
+     },
+     "matchingColumns": [],
+     "schema": [
+      {
+       "id": "title",
+       "displayName": "title",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string",
+       "removed": false
+      },
+      {
+       "id": "message",
+       "displayName": "message",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string",
+       "removed": false
+      },
+      {
+       "id": "priority",
+       "displayName": "priority",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string",
+       "removed": false
+      },
+      {
+       "id": "channels",
+       "displayName": "channels",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string",
+       "removed": false
+      }
+     ],
+     "attemptToConvertTypes": false,
+     "convertFieldsToString": false
+    },
+    "options": {
+     "waitForSubWorkflow": true
+    }
+   }
+  }
+ ],
+ "connections": {
+  "Every 3 hours": {
+   "main": [
+    [
+     {
+      "node": "Ping model",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Ping model": {
+   "main": [
+    [
+     {
+      "node": "Changed?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Changed?": {
+   "main": [
+    [
+     {
+      "node": "Notify Me",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ },
+ "settings": {
+  "timezone": "__JC_TZ__",
+  "executionOrder": "v1"
+ }
+}

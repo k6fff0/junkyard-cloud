@@ -1,0 +1,70 @@
+{
+ "name": "Server Ops",
+ "nodes": [
+  {
+   "id": "__NEWID__",
+   "name": "Called by workflow",
+   "type": "n8n-nodes-base.executeWorkflowTrigger",
+   "typeVersion": 1.1,
+   "position": [
+    0,
+    0
+   ],
+   "parameters": {
+    "inputSource": "workflowInputs",
+    "workflowInputs": {
+     "values": [
+      {
+       "name": "action"
+      },
+      {
+       "name": "arg1"
+      },
+      {
+       "name": "arg2"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Run on host (restricted)",
+   "type": "n8n-nodes-base.ssh",
+   "typeVersion": 1,
+   "position": [
+    240,
+    0
+   ],
+   "parameters": {
+    "authentication": "privateKey",
+    "resource": "command",
+    "operation": "execute",
+    "command": "={{ String($json.action || '').replace(/[^a-z_]/g, '') + ($json.arg1 ? ' ' + String($json.arg1).replace(/[^A-Za-z0-9_:.\\-]/g, '') : '') + ($json.arg2 ? ' ' + String($json.arg2).base64Encode() : '') }}",
+    "cwd": "/"
+   },
+   "credentials": {
+    "sshPrivateKey": {
+     "id": "__CRED:Server ops (restricted SSH)__",
+     "name": "Server ops (restricted SSH)"
+    }
+   }
+  }
+ ],
+ "connections": {
+  "Called by workflow": {
+   "main": [
+    [
+     {
+      "node": "Run on host (restricted)",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ },
+ "settings": {
+  "executionOrder": "v1"
+ }
+}

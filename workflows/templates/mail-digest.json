@@ -1,0 +1,221 @@
+{
+ "name": "Mail Digest",
+ "nodes": [
+  {
+   "id": "__NEWID__",
+   "name": "Every day 21:00",
+   "type": "n8n-nodes-base.scheduleTrigger",
+   "typeVersion": 1.2,
+   "position": [
+    220,
+    300
+   ],
+   "parameters": {
+    "rule": {
+     "interval": [
+      {
+       "field": "cronExpression",
+       "expression": "0 21 * * *"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Forget old",
+   "type": "n8n-nodes-base.postgres",
+   "typeVersion": 2.5,
+   "alwaysOutputData": true,
+   "position": [
+    440,
+    300
+   ],
+   "parameters": {
+    "operation": "executeQuery",
+    "query": "DELETE FROM jc_mail WHERE received_at < now() - interval '90 days' RETURNING id;",
+    "options": {}
+   },
+   "credentials": {
+    "postgres": {
+     "id": "__CRED:Assistant database__",
+     "name": "Assistant database"
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Get waiting",
+   "type": "n8n-nodes-base.postgres",
+   "typeVersion": 2.5,
+   "executeOnce": true,
+   "position": [
+    660,
+    300
+   ],
+   "parameters": {
+    "operation": "executeQuery",
+    "query": "SELECT id, account, to_addr, from_name, from_addr, subject, summary, category FROM jc_mail WHERE digested_at IS NULL AND notified_at IS NULL AND category IN ('normal', 'promo', 'pending') AND received_at > now() - interval '3 days' ORDER BY id;",
+    "options": {}
+   },
+   "credentials": {
+    "postgres": {
+     "id": "__CRED:Assistant database__",
+     "name": "Assistant database"
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Build digest",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    880,
+    300
+   ],
+   "parameters": {
+    "jsCode": "\nconst clip = (s, n) => String(s ?? '').replace(/[\\u0000-\\u001f\\u007f​-‏‪-‮⁠-⁩﻿]/g, ' ').replace(/\\s+/g, ' ').trim().slice(0, n);\n\nconst rows = $input.all().map(i => i.json).filter(r => r.id);\nif (!rows.length) return [];\nconst ALIASES = __JS:MAIL_ALIASES__;\nconst label = r => (r.to_addr || '').split(/,\\s*/).find(a => ALIASES.includes(a)) || r.account;\nconst normal = rows.filter(r => r.category !== 'promo');\nconst promo = rows.filter(r => r.category === 'promo');\nconst lines = [__TJS:digest_title__];\nconst groups = {};\nfor (const r of normal) (groups[label(r)] = groups[label(r)] || []).push(r);\nlet shown = 0;\nfor (const [acc, list] of Object.entries(groups)) {\n  lines.push('', '*' + acc + '*');\n  for (const r of list) {\n    if (shown >= 40) break;\n    const who = clip(r.from_name || r.from_addr, 40).replace(/[*_~`]/g, '');\n    lines.push('• ' + who + ': ' + clip(r.summary || r.subject, 160));\n    shown++;\n  }\n}\nif (normal.length > shown) lines.push('', __TJS:digest_more__.replace('{n}', normal.length - shown));\nif (promo.length) {\n  const by = {};\n  for (const r of promo) { const k = clip(r.from_name || r.from_addr, 25).replace(/[*_~`]/g, ''); by[k] = (by[k] || 0) + 1; }\n  const top = Object.entries(by).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k, v]) => k + (v > 1 ? ' ' + v : '')).join(__TJS:list_sep__);\n  lines.push('', __TJS:digest_promo__.replace('{n}', promo.length).replace('{top}', top));\n}\nreturn [{ json: { text: lines.join('\\n').slice(0, 6000), ids: rows.map(r => Number(r.id)) } }];\n"
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Send digest",
+   "type": "n8n-nodes-base.executeWorkflow",
+   "typeVersion": 1.2,
+   "position": [
+    1100,
+    300
+   ],
+   "parameters": {
+    "source": "database",
+    "workflowId": {
+     "__rl": true,
+     "value": "__WF:Owner Message__",
+     "mode": "id"
+    },
+    "workflowInputs": {
+     "mappingMode": "defineBelow",
+     "value": {
+      "text": "={{ $json.text }}",
+      "channel": "__JC_CH_MAIN__"
+     },
+     "matchingColumns": [],
+     "schema": [
+      {
+       "id": "text",
+       "displayName": "text",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string",
+       "removed": false
+      },
+      {
+       "id": "channel",
+       "displayName": "channel",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string",
+       "removed": false
+      }
+     ],
+     "attemptToConvertTypes": false,
+     "convertFieldsToString": false
+    },
+    "options": {
+     "waitForSubWorkflow": true
+    }
+   },
+   "onError": "continueRegularOutput"
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Mark digested",
+   "type": "n8n-nodes-base.postgres",
+   "typeVersion": 2.5,
+   "executeOnce": true,
+   "position": [
+    1320,
+    300
+   ],
+   "parameters": {
+    "operation": "executeQuery",
+    "query": "UPDATE jc_mail SET digested_at = now() WHERE id = ANY($1::bigint[]) RETURNING id;",
+    "options": {
+     "queryReplacement": "={{ [ '{' + $('Build digest').first().json.ids.join(',') + '}' ] }}"
+    }
+   },
+   "credentials": {
+    "postgres": {
+     "id": "__CRED:Assistant database__",
+     "name": "Assistant database"
+    }
+   }
+  }
+ ],
+ "connections": {
+  "Every day 21:00": {
+   "main": [
+    [
+     {
+      "node": "Forget old",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Forget old": {
+   "main": [
+    [
+     {
+      "node": "Get waiting",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Get waiting": {
+   "main": [
+    [
+     {
+      "node": "Build digest",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Build digest": {
+   "main": [
+    [
+     {
+      "node": "Send digest",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Send digest": {
+   "main": [
+    [
+     {
+      "node": "Mark digested",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ },
+ "settings": {
+  "timezone": "__JC_TZ__",
+  "executionOrder": "v1"
+ }
+}

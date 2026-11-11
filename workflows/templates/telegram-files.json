@@ -1,0 +1,174 @@
+{
+ "name": "Telegram Files",
+ "nodes": [
+  {
+   "id": "__NEWID__",
+   "name": "Called by workflow",
+   "type": "n8n-nodes-base.executeWorkflowTrigger",
+   "typeVersion": 1.1,
+   "position": [
+    0,
+    100
+   ],
+   "parameters": {
+    "inputSource": "workflowInputs",
+    "workflowInputs": {
+     "values": [
+      {
+       "name": "message"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Classify",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    220,
+    100
+   ],
+   "parameters": {
+    "method": "POST",
+    "url": "__JC_FILEBRIDGE_URL__/incoming",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify({ message: JSON.parse($json.message) }) }}",
+    "options": {
+     "timeout": 60000
+    }
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "__CRED:Filebridge key__",
+     "name": "Filebridge key"
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Action",
+   "type": "n8n-nodes-base.switch",
+   "typeVersion": 3.2,
+   "position": [
+    440,
+    100
+   ],
+   "parameters": {
+    "mode": "expression",
+    "numberOutputs": 2,
+    "output": "={{ $json.action === 'agent' ? 0 : 1 }}",
+    "options": {}
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Ask assistant",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    660,
+    200
+   ],
+   "parameters": {
+    "method": "POST",
+    "url": "http://localhost:5678/webhook/assistant",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify({ text: $json.text, channel: 'telegram' }) }}",
+    "options": {
+     "timeout": 900000
+    }
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "__CRED:Notify secret__",
+     "name": "Notify secret"
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Reply",
+   "type": "n8n-nodes-base.telegram",
+   "typeVersion": 1.2,
+   "position": [
+    880,
+    200
+   ],
+   "parameters": {
+    "resource": "message",
+    "operation": "sendMessage",
+    "chatId": "__JC_TG_CHAT__",
+    "text": "={{ ($json.output || '...').replace(/[*_`\\[\\]]/g, '') }}",
+    "additionalFields": {
+     "appendAttribution": false
+    }
+   },
+   "credentials": {
+    "telegramApi": {
+     "id": "__CRED:Telegram bot__",
+     "name": "Telegram bot"
+    }
+   },
+   "webhookId": "__NEWID__"
+  }
+ ],
+ "connections": {
+  "Called by workflow": {
+   "main": [
+    [
+     {
+      "node": "Classify",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Classify": {
+   "main": [
+    [
+     {
+      "node": "Action",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Action": {
+   "main": [
+    [
+     {
+      "node": "Ask assistant",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    []
+   ]
+  },
+  "Ask assistant": {
+   "main": [
+    [
+     {
+      "node": "Reply",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ },
+ "settings": {
+  "timezone": "__JC_TZ__",
+  "executionOrder": "v1"
+ }
+}

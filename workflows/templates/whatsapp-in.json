@@ -1,0 +1,336 @@
+{
+ "name": "WhatsApp In",
+ "nodes": [
+  {
+   "id": "__NEWID__",
+   "name": "From WhatsApp",
+   "webhookId": "__NEWID__",
+   "type": "n8n-nodes-base.webhook",
+   "typeVersion": 2,
+   "position": [
+    0,
+    100
+   ],
+   "parameters": {
+    "httpMethod": "POST",
+    "path": "whatsapp-in",
+    "authentication": "headerAuth",
+    "responseMode": "onReceived",
+    "options": {}
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "__CRED:Notify secret__",
+     "name": "Notify secret"
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Classify",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    220,
+    100
+   ],
+   "parameters": {
+    "method": "POST",
+    "url": "__JC_FILEBRIDGE_URL__/wa-incoming",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify({ event: $json.body.event, payload: $json.body.payload }) }}",
+    "options": {
+     "timeout": 120000
+    }
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "__CRED:Filebridge key__",
+     "name": "Filebridge key"
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Action",
+   "type": "n8n-nodes-base.switch",
+   "typeVersion": 3.2,
+   "position": [
+    440,
+    100
+   ],
+   "parameters": {
+    "mode": "expression",
+    "numberOutputs": 3,
+    "output": "={{ ({agent: 0, voice: 1})[$json.action] ?? 2 }}",
+    "options": {}
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Ask assistant",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    1320,
+    0
+   ],
+   "parameters": {
+    "method": "POST",
+    "url": "http://localhost:5678/webhook/assistant",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify({ text: ($('Classify').first().json.action === 'voice' ? ($('Classify').first().json.prefix || '') : '') + $json.text, channel: 'whatsapp' }) }}",
+    "options": {
+     "timeout": 900000
+    }
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "__CRED:Notify secret__",
+     "name": "Notify secret"
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Get voice",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    660,
+    300
+   ],
+   "parameters": {
+    "method": "GET",
+    "url": "={{ $json.url }}",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "options": {
+     "response": {
+      "response": {
+       "responseFormat": "file"
+      }
+     }
+    }
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "__CRED:WAHA key__",
+     "name": "WAHA key"
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Rename to ogg",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    880,
+    300
+   ],
+   "parameters": {
+    "jsCode": "for (const item of $input.all()) {\n  item.binary.data.fileName = 'voice.ogg';\n  item.binary.data.fileExtension = 'ogg';\n  item.binary.data.mimeType = 'audio/ogg';\n}\nreturn $input.all();"
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Transcribe",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "onError": "continueErrorOutput",
+   "position": [
+    1100,
+    300
+   ],
+   "parameters": {
+    "method": "POST",
+    "url": "__JC_OPENAI_URL__/audio/transcriptions",
+    "authentication": "predefinedCredentialType",
+    "nodeCredentialType": "openAiApi",
+    "sendBody": true,
+    "contentType": "multipart-form-data",
+    "bodyParameters": {
+     "parameters": [
+      {
+       "parameterType": "formBinaryData",
+       "name": "file",
+       "inputDataFieldName": "data"
+      },
+      {
+       "name": "model",
+       "value": "__JC_MODEL_TRANSCRIBE__"
+      },
+      {
+       "name": "language",
+       "value": "__JC_LANG__"
+      }
+     ]
+    },
+    "options": {}
+   },
+   "credentials": {
+    "openAiApi": {
+     "id": "__CRED:OpenAI__",
+     "name": "OpenAI"
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Reply on WhatsApp",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    1540,
+    0
+   ],
+   "parameters": {
+    "method": "POST",
+    "url": "__JC_WAHA_URL__/api/sendText",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendBody": true,
+    "specifyBody": "json",
+    "jsonBody": "={{ JSON.stringify({ session: '__JC_WA_SESSION__', chatId: '__JC_WA_CHAT__', text: ($json.output || $json.text || '...').replace(/[`\\[\\]]/g, '') }) }}",
+    "options": {
+     "timeout": 60000
+    }
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "__CRED:WAHA key__",
+     "name": "WAHA key"
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Model failed",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1300,
+    500
+   ],
+   "parameters": {
+    "jsCode": "const raw = JSON.stringify($input.first().json || {}).toLowerCase();\nconst quota = /insufficient_quota|exceeded your current quota|billing|credit|payment|rate limit|429/.test(raw);\nconst output = (quota ? __TJS:model_quota__ : __TJS:model_down__) + __TJS:model_still_works__;\nreturn [{ json: { output, model_error: raw.slice(0, 300) } }];\n"
+   }
+  }
+ ],
+ "connections": {
+  "From WhatsApp": {
+   "main": [
+    [
+     {
+      "node": "Classify",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Classify": {
+   "main": [
+    [
+     {
+      "node": "Action",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Action": {
+   "main": [
+    [
+     {
+      "node": "Ask assistant",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Get voice",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    []
+   ]
+  },
+  "Get voice": {
+   "main": [
+    [
+     {
+      "node": "Rename to ogg",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Rename to ogg": {
+   "main": [
+    [
+     {
+      "node": "Transcribe",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Transcribe": {
+   "main": [
+    [
+     {
+      "node": "Ask assistant",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Model failed",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Ask assistant": {
+   "main": [
+    [
+     {
+      "node": "Reply on WhatsApp",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Model failed": {
+   "main": [
+    [
+     {
+      "node": "Reply on WhatsApp",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ },
+ "settings": {
+  "timezone": "__JC_TZ__",
+  "executionOrder": "v1"
+ }
+}

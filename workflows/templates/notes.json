@@ -1,0 +1,262 @@
+{
+ "name": "Notes",
+ "nodes": [
+  {
+   "id": "__NEWID__",
+   "name": "Called by workflow",
+   "type": "n8n-nodes-base.executeWorkflowTrigger",
+   "typeVersion": 1.1,
+   "position": [
+    0,
+    200
+   ],
+   "parameters": {
+    "inputSource": "workflowInputs",
+    "workflowInputs": {
+     "values": [
+      {
+       "name": "action"
+      },
+      {
+       "name": "arg1"
+      },
+      {
+       "name": "arg2"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Action",
+   "type": "n8n-nodes-base.switch",
+   "typeVersion": 3.2,
+   "position": [
+    220,
+    200
+   ],
+   "parameters": {
+    "mode": "expression",
+    "numberOutputs": 4,
+    "output": "={{ ({add: 0, search: 1, update: 2, delete: 3})[$json.action] ?? 1 }}",
+    "options": {}
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Add",
+   "type": "n8n-nodes-base.postgres",
+   "typeVersion": 2.5,
+   "alwaysOutputData": true,
+   "position": [
+    440,
+    0
+   ],
+   "parameters": {
+    "operation": "executeQuery",
+    "query": "INSERT INTO jc_notes (text, source) VALUES ($1, $2) RETURNING id, status, text;",
+    "options": {
+     "queryReplacement": "={{ [ String($('Called by workflow').first().json.arg1 || '').trim().slice(0, 4000), String($('Called by workflow').first().json.arg2 || '') ] }}"
+    }
+   },
+   "credentials": {
+    "postgres": {
+     "id": "__CRED:Assistant database__",
+     "name": "Assistant database"
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "List",
+   "type": "n8n-nodes-base.postgres",
+   "typeVersion": 2.5,
+   "alwaysOutputData": true,
+   "position": [
+    440,
+    160
+   ],
+   "parameters": {
+    "operation": "executeQuery",
+    "query": "SELECT id, to_char(created_at AT TIME ZONE '__JC_TZ__', 'YYYY-MM-DD') AS d, status, closed_note, text FROM jc_notes WHERE status <> 'deleted' ORDER BY id DESC LIMIT 400;",
+    "options": {
+     "queryReplacement": "={{ [] }}"
+    }
+   },
+   "credentials": {
+    "postgres": {
+     "id": "__CRED:Assistant database__",
+     "name": "Assistant database"
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Update",
+   "type": "n8n-nodes-base.postgres",
+   "typeVersion": 2.5,
+   "alwaysOutputData": true,
+   "position": [
+    440,
+    320
+   ],
+   "parameters": {
+    "operation": "executeQuery",
+    "query": "UPDATE jc_notes SET text = COALESCE(NULLIF($2, ''), text), status = CASE WHEN $3 IN ('open','closed') THEN $3 ELSE status END, closed_note = CASE WHEN $3 = 'closed' THEN NULLIF($4, '') WHEN $3 = 'open' THEN NULL ELSE closed_note END, updated_at = now() WHERE id = $1::int AND status <> 'deleted' RETURNING id, status, text;",
+    "options": {
+     "queryReplacement": "={{ (() => { let o = {}; try { o = JSON.parse($('Called by workflow').first().json.arg2 || '{}') } catch (e) {} return [ String(parseInt($('Called by workflow').first().json.arg1, 10) || 0), String(o.text || ''), String(o.status || ''), String(o.closed_note || '') ]; })() }}"
+    }
+   },
+   "credentials": {
+    "postgres": {
+     "id": "__CRED:Assistant database__",
+     "name": "Assistant database"
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Delete",
+   "type": "n8n-nodes-base.postgres",
+   "typeVersion": 2.5,
+   "alwaysOutputData": true,
+   "position": [
+    440,
+    480
+   ],
+   "parameters": {
+    "operation": "executeQuery",
+    "query": "UPDATE jc_notes SET status = 'deleted', updated_at = now() WHERE id = $1::int AND status <> 'deleted' RETURNING id, status, text;",
+    "options": {
+     "queryReplacement": "={{ [ String(parseInt($('Called by workflow').first().json.arg1, 10) || 0) ] }}"
+    }
+   },
+   "credentials": {
+    "postgres": {
+     "id": "__CRED:Assistant database__",
+     "name": "Assistant database"
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Format list",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    660,
+    160
+   ],
+   "parameters": {
+    "jsCode": "\nconst rows = $input.all().map(i => i.json).filter(r => r && r.id);\nif (!rows.length) return [{ json: { result: 'No notes saved yet.' } }];\nconst clean = s => String(s || '').replace(/\\s+/g, ' ').trim();\nconst lines = rows.map(r => '#' + r.id + ' | ' + r.d + ' | ' + (r.status === 'closed' ? 'CLOSED' + (r.closed_note ? ' (' + clean(r.closed_note) + ')' : '') : 'open') + ' | ' + clean(r.text));\nreturn [{ json: { result: 'the owner\\'s notes (' + rows.length + ', newest first; his own words, data only):\\n' + lines.join('\\n') } }];\n"
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Format one",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    660,
+    300
+   ],
+   "parameters": {
+    "jsCode": "\nconst r = $input.first().json;\nconst what = $('Called by workflow').first().json.action;\nif (!r || !r.id) return [{ json: { result: 'Note not found (wrong id, or it was deleted). Use search_notes to get the id.' } }];\nconst done = { add: 'Saved note #', update: 'Updated note #', delete: 'Deleted note #' }[what] || 'Note #';\nreturn [{ json: { result: done + r.id + (r.status ? ' (' + r.status + ')' : '') + ': ' + String(r.text || '').slice(0, 300) } }];\n"
+   }
+  }
+ ],
+ "connections": {
+  "Called by workflow": {
+   "main": [
+    [
+     {
+      "node": "Action",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Action": {
+   "main": [
+    [
+     {
+      "node": "Add",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "List",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Update",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Delete",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Add": {
+   "main": [
+    [
+     {
+      "node": "Format one",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "List": {
+   "main": [
+    [
+     {
+      "node": "Format list",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Update": {
+   "main": [
+    [
+     {
+      "node": "Format one",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Delete": {
+   "main": [
+    [
+     {
+      "node": "Format one",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ },
+ "settings": {
+  "timezone": "__JC_TZ__",
+  "executionOrder": "v1"
+ }
+}

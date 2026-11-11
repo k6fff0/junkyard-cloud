@@ -1,0 +1,471 @@
+{
+ "name": "Uptime Alerts",
+ "nodes": [
+  {
+   "id": "__NEWID__",
+   "name": "From Uptime Kuma",
+   "webhookId": "__NEWID__",
+   "type": "n8n-nodes-base.webhook",
+   "typeVersion": 2,
+   "position": [
+    0,
+    0
+   ],
+   "parameters": {
+    "httpMethod": "POST",
+    "path": "uptime",
+    "authentication": "headerAuth",
+    "responseMode": "onReceived",
+    "options": {}
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "id": "__CRED:Notify secret__",
+     "name": "Notify secret"
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Parse",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    220,
+    0
+   ],
+   "parameters": {
+    "jsCode": "\nconst b = $input.first().json.body || {};\nconst hb = b.heartbeat || null;\nconst mon = b.monitor || {};\nconst CALL = __JS:CALL_MONITORS__;\nconst clean = s => String(s || '').replace(/[\\u0000-\\u001f]/g, ' ').trim();\nconst name = clean(mon.name).slice(0, 80);\nif (!hb) return [{ json: { kind: 'info', title: '📈 Uptime Kuma', message: clean(b.msg).slice(0, 800) } }];\nconst msg = clean(hb.msg).slice(0, 300);\nconst url = clean(mon.url && mon.url !== 'https://' ? mon.url : (mon.hostname ? mon.hostname + ':' + mon.port : ''));\nif (hb.status === 0) return [{ json: { kind: CALL.includes(name) ? 'down_prod' : 'down', name, url: mon.url || '',\n  keyword: mon.keyword || '', title: __TJS:uptime_down_title__.replace('{name}', name), message: __TJS:uptime_down_msg__.replace('{name}', name) + '\\n' + msg + (url ? '\\n' + url : '') } }];\nif (hb.status === 1) return [{ json: { kind: 'up', name, title: __TJS:uptime_up_title__.replace('{name}', name), message: __TJS:uptime_up_msg__.replace('{name}', name) } }];\nreturn [];\n"
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Kind",
+   "type": "n8n-nodes-base.switch",
+   "typeVersion": 3.2,
+   "position": [
+    440,
+    0
+   ],
+   "parameters": {
+    "mode": "expression",
+    "numberOutputs": 2,
+    "output": "={{ $json.kind === 'down_prod' ? 1 : 0 }}",
+    "options": {}
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Tell owner",
+   "type": "n8n-nodes-base.executeWorkflow",
+   "typeVersion": 1.2,
+   "position": [
+    660,
+    -100
+   ],
+   "parameters": {
+    "source": "database",
+    "workflowId": {
+     "__rl": true,
+     "value": "__WF:Notify Me__",
+     "mode": "id"
+    },
+    "workflowInputs": {
+     "mappingMode": "defineBelow",
+     "value": {
+      "title": "={{ $('Parse').first().json.title }}",
+      "message": "={{ $json.message || $('Parse').first().json.message }}",
+      "priority": "normal",
+      "channels": "__JC_CH_MAIN__"
+     },
+     "matchingColumns": [],
+     "schema": [
+      {
+       "id": "title",
+       "displayName": "title",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string",
+       "removed": false
+      },
+      {
+       "id": "message",
+       "displayName": "message",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string",
+       "removed": false
+      },
+      {
+       "id": "priority",
+       "displayName": "priority",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string",
+       "removed": false
+      },
+      {
+       "id": "channels",
+       "displayName": "channels",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string",
+       "removed": false
+      }
+     ],
+     "attemptToConvertTypes": false,
+     "convertFieldsToString": false
+    },
+    "options": {
+     "waitForSubWorkflow": true
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Tell owner (important)",
+   "type": "n8n-nodes-base.executeWorkflow",
+   "typeVersion": 1.2,
+   "position": [
+    660,
+    120
+   ],
+   "parameters": {
+    "source": "database",
+    "workflowId": {
+     "__rl": true,
+     "value": "__WF:Notify Me__",
+     "mode": "id"
+    },
+    "workflowInputs": {
+     "mappingMode": "defineBelow",
+     "value": {
+      "title": "={{ $('Parse').first().json.title }}",
+      "message": "={{ $json.message || $('Parse').first().json.message }}",
+      "priority": "normal",
+      "channels": "__JC_CH_ALL_TEXT__"
+     },
+     "matchingColumns": [],
+     "schema": [
+      {
+       "id": "title",
+       "displayName": "title",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string",
+       "removed": false
+      },
+      {
+       "id": "message",
+       "displayName": "message",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string",
+       "removed": false
+      },
+      {
+       "id": "priority",
+       "displayName": "priority",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string",
+       "removed": false
+      },
+      {
+       "id": "channels",
+       "displayName": "channels",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string",
+       "removed": false
+      }
+     ],
+     "attemptToConvertTypes": false,
+     "convertFieldsToString": false
+    },
+    "options": {
+     "waitForSubWorkflow": true
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Wait 3 min",
+   "webhookId": "__NEWID__",
+   "type": "n8n-nodes-base.wait",
+   "typeVersion": 1.1,
+   "position": [
+    880,
+    120
+   ],
+   "parameters": {
+    "amount": 3,
+    "unit": "minutes"
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Check again",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "onError": "continueRegularOutput",
+   "position": [
+    1100,
+    120
+   ],
+   "parameters": {
+    "method": "GET",
+    "url": "={{ $('Parse').first().json.url }}",
+    "options": {
+     "timeout": 20000,
+     "response": {
+      "response": {
+       "fullResponse": true,
+       "neverError": true,
+       "responseFormat": "text"
+      }
+     }
+    }
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Still down?",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1320,
+    120
+   ],
+   "parameters": {
+    "jsCode": "const p = $('Parse').first().json;\nconst r = $input.first().json;\nconst code = r.statusCode || 0;\nlet down = !(code >= 200 && code < 400);\nif (!down && p.keyword) down = !String(r.body || '').includes(p.keyword);\nreturn [{ json: { down, message: __TJS:uptime_still_down__.replace('{name}', p.name).replace('{code}', code || __TJS:no_reply__) } }];\n"
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Down?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2.2,
+   "position": [
+    1540,
+    120
+   ],
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "strict",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "c1",
+       "leftValue": "={{ $json.down }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   }
+  },
+  {
+   "id": "__NEWID__",
+   "name": "Call owner",
+   "type": "n8n-nodes-base.executeWorkflow",
+   "typeVersion": 1.2,
+   "position": [
+    1760,
+    100
+   ],
+   "parameters": {
+    "source": "database",
+    "workflowId": {
+     "__rl": true,
+     "value": "__WF:Notify Me__",
+     "mode": "id"
+    },
+    "workflowInputs": {
+     "mappingMode": "defineBelow",
+     "value": {
+      "title": "={{ $('Parse').first().json.title }}",
+      "message": "={{ $json.message || $('Parse').first().json.message }}",
+      "priority": "normal",
+      "channels": "__JC_CH_CALL__"
+     },
+     "matchingColumns": [],
+     "schema": [
+      {
+       "id": "title",
+       "displayName": "title",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string",
+       "removed": false
+      },
+      {
+       "id": "message",
+       "displayName": "message",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string",
+       "removed": false
+      },
+      {
+       "id": "priority",
+       "displayName": "priority",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string",
+       "removed": false
+      },
+      {
+       "id": "channels",
+       "displayName": "channels",
+       "required": false,
+       "defaultMatch": false,
+       "display": true,
+       "canBeUsedToMatch": true,
+       "type": "string",
+       "removed": false
+      }
+     ],
+     "attemptToConvertTypes": false,
+     "convertFieldsToString": false
+    },
+    "options": {
+     "waitForSubWorkflow": true
+    }
+   }
+  }
+ ],
+ "connections": {
+  "From Uptime Kuma": {
+   "main": [
+    [
+     {
+      "node": "Parse",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Parse": {
+   "main": [
+    [
+     {
+      "node": "Kind",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Kind": {
+   "main": [
+    [
+     {
+      "node": "Tell owner",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Tell owner (important)",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Tell owner (important)": {
+   "main": [
+    [
+     {
+      "node": "Wait 3 min",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Wait 3 min": {
+   "main": [
+    [
+     {
+      "node": "Check again",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Check again": {
+   "main": [
+    [
+     {
+      "node": "Still down?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Still down?": {
+   "main": [
+    [
+     {
+      "node": "Down?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Down?": {
+   "main": [
+    [
+     {
+      "node": "Call owner",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ },
+ "settings": {
+  "timezone": "__JC_TZ__",
+  "executionOrder": "v1"
+ }
+}
