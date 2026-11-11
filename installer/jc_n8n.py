@@ -220,6 +220,20 @@ def substitute(obj, v, js, msgs, extra, wf_ids=None, cred_ids=None):
     return walk(obj)
 
 
+NODE_REF = re.compile(r"\$\('([^']+)'\)")
+
+
+def strings(x):
+    if isinstance(x, dict):
+        for v in x.values():
+            yield from strings(v)
+    elif isinstance(x, list):
+        for v in x:
+            yield from strings(v)
+    elif isinstance(x, str):
+        yield x
+
+
 def plan(cfg, extra=None):
     """-> (workflows with values filled in except ids, the creation order, the credentials they use)."""
     on, manifest = modules(cfg)
@@ -239,6 +253,13 @@ def plan(cfg, extra=None):
     # the stream link carries the voice bridge's secret: filled in by install from the secrets file
     extra.setdefault("VOICE_STREAM_URL", "wss://%s/stream/SECRET" % ((cfg.get("calls") or {}).get("voice_host") or "voice.example.com"))
     wfs = strip_modules(templates(), on, manifest)
+    for name, w in wfs.items():   # a node that reads another node which a turned-off module removed
+        have = {n["name"] for n in w["nodes"]}
+        for n in w["nodes"]:
+            for s in strings(n["parameters"]):
+                for ref in NODE_REF.findall(s):
+                    if ref not in have and "try {" not in s:
+                        raise Fail("%s / %s reads node %r, which is not installed" % (name, n["name"], ref))
     wfs = {n: substitute(w, v, js, locale["messages"], extra) for n, w in wfs.items()}
     refs = {n: set(re.findall(r"__WF:([^_]+)__", json.dumps(w))) for n, w in wfs.items()}
     for n, r in refs.items():

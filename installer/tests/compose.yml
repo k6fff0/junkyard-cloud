@@ -1,0 +1,34 @@
+# Throwaway stack for the installer's end-to-end test: real n8n and file bridge, fake WhatsApp and OpenAI.
+name: jc-it
+services:
+  db:
+    image: postgres:16-alpine
+    environment: {POSTGRES_USER: jc, POSTGRES_PASSWORD: db-test-password-123, POSTGRES_DB: assistant}
+  fake:
+    image: python:3.14.10-slim
+    command: ["sh", "-c", "pip install -q aiohttp==3.14.5 && python /t/fake_services.py"]
+    volumes: ["./fake_services.py:/t/fake_services.py:ro"]
+    ports: ["127.0.0.1:19000:9000"]
+  filebridge:
+    build: ./filebridge
+    environment:
+      BRIDGE_KEY: filebridge-test-key-0123456789abcdef
+      WAHA_URL: http://fake:9000
+      WAHA_KEY: waha-test-key
+      WA_OWNER: "15550001111"
+      OWNER_NAME: Sam
+      LANG_CODE: en
+      WA_WAIT: "1"
+      CHAIN: "1"
+      TEXT_WAIT: "1"
+    tmpfs: ["/data:uid=10002"]
+    depends_on: [fake]
+  n8n:
+    image: n8nio/n8n:2.42.6
+    environment:
+      N8N_SECURE_COOKIE: "false"
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_PERSONALIZATION_ENABLED: "false"
+      GENERIC_TIMEZONE: Europe/Lisbon
+    ports: ["127.0.0.1:15679:5678"]
+    depends_on: [db, fake, filebridge]

@@ -449,7 +449,7 @@
      "conditions": [
       {
        "id": "c1",
-       "leftValue": "={{ $('Telegram Trigger').isExecuted }}",
+       "leftValue": "={{ (() => { try { return $('Telegram Trigger').isExecuted; } catch (e) { return false; } })() }}",
        "rightValue": "",
        "operator": {
         "type": "boolean",
