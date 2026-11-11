@@ -390,14 +390,54 @@ def ensure(base, token, kind, name, body):
     return http_json("POST", "%s/api/%s/" % (base, kind), token, dict(body, name=name))["id"]
 
 
-def archive_setup(cfg, sec, locale):
+ASSISTANT_PERMS = ["view_document", "add_document", "change_document", "view_documenttype", "view_tag",
+                   "view_customfield", "view_note", "add_note", "view_paperlesstask"]
+
+
+def archive_setup(cfg, sec, locale, secrets_path):
+    """Document types, the expiry date field, the chat tags, and a limited 'assistant' user for n8n and the file
+    bridge (never the admin): every new document is shared with it, and n8n hears about it by webhook."""
     base = cfg["paperless_admin_url"].rstrip("/")
-    token = sec["paperless_token"]
+    admin = sec.get("paperless_admin_token") or ""
+    if not admin:
+        raise Fail("the archive needs paperless_admin_token in the secrets file (the admin's API token)")
     for t in locale["doc_types"]:
-        ensure(base, token, "document_types", t, {"matching_algorithm": 0})
-    field = ensure(base, token, "custom_fields", locale["expiry_field"], {"data_type": "date"})
-    tags = {c: ensure(base, token, "tags", n, {"matching_algorithm": 0})
+        ensure(base, admin, "document_types", t, {"matching_algorithm": 0})
+    field = ensure(base, admin, "custom_fields", locale["expiry_field"], {"data_type": "date"})
+    tags = {c: ensure(base, admin, "tags", n, {"matching_algorithm": 0})
             for c, n in (("telegram", "Telegram"), ("whatsapp", "WhatsApp"))}
+    users = http_json("GET", base + "/api/users/?username__iexact=assistant", admin).get("results") or []
+    if users:
+        uid = users[0]["id"]
+        if not sec.get("paperless_token"):
+            raise Fail("the archive user 'assistant' exists but paperless_token is missing from the secrets file")
+    else:
+        password = uuid.uuid4().hex + uuid.uuid4().hex
+        uid = http_json("POST", base + "/api/users/", admin, {"username": "assistant", "password": password,
+                                                              "is_superuser": False, "is_staff": False,
+                                                              "user_permissions": ASSISTANT_PERMS})["id"]
+        req = urllib.request.Request(base + "/api/token/", method="POST",
+                                     data=json.dumps({"username": "assistant", "password": password}).encode(),
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=60) as r:
+            sec["paperless_token"] = json.loads(r.read())["token"]
+        save_private(secrets_path, sec)
+        print("archive: user 'assistant' created; its token was added to the secrets file (paperless_token)")
+    flows = {w["name"]: w for w in http_json("GET", base + "/api/workflows/", admin).get("results") or []}
+    added = {"type": 2, "sources": [1, 2, 3, 4], "matching_algorithm": 0, "match": "", "is_insensitive": True}
+    wanted = {
+        "Share new documents with the assistant": {"type": 1, "assign_view_users": [uid], "assign_change_users": [uid]},
+        "Tell the assistant about new documents": {"type": 4, "webhook": {
+            "url": cfg.get("paperless_webhook_url", "http://n8n:5678/webhook/paperless-added"),
+            "use_params": True, "as_json": True, "params": {"doc_id": "{{ doc_id }}"}, "body": None,
+            "headers": {"X-Notify-Secret": sec["notify_secret"]}, "include_document": False}},
+    }
+    for order, (name, action) in enumerate(wanted.items()):
+        body = {"name": name, "order": order, "enabled": True, "triggers": [added], "actions": [action]}
+        if name in flows:
+            http_json("PUT", "%s/api/workflows/%s/" % (base, flows[name]["id"]), admin, body)
+        else:
+            http_json("POST", base + "/api/workflows/", admin, body)
     return {"EXPIRY_FIELD": field, "TAG_TELEGRAM": tags["telegram"], "TAG_WHATSAPP": tags["whatsapp"]}
 
 
@@ -409,7 +449,7 @@ def install(a):
     extra = {}
     if "archive" in on:
         locale = load_json(os.path.join(WF_DIR, "locales", "%s.json" % cfg.get("lang", "en")))
-        extra = archive_setup(cfg, sec, {**load_json(os.path.join(WF_DIR, "locales", "en.json")), **locale})
+        extra = archive_setup(cfg, sec, {**load_json(os.path.join(WF_DIR, "locales", "en.json")), **locale}, a.secrets)
         print("archive: types, expiry field %(EXPIRY_FIELD)s, tags %(TAG_TELEGRAM)s/%(TAG_WHATSAPP)s" % extra)
     if "calls" in on:
         host = (cfg.get("calls") or {}).get("voice_host")
