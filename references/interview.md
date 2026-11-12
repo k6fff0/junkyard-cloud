@@ -73,9 +73,11 @@ s = json.load(open(p)) if os.path.exists(p) else {}
 for k in ("assistant_db_password", "waha_key", "notify_secret", "mail_secret", "filebridge_key", "downloads_key",
           "webtool_key", "voice_stream_secret", "n8n_encryption_key"):
     s.setdefault(k, secrets.token_hex(24))
-# n8n wants upper- and lower-case letters and a digit in its owner password
+# passwords people type (n8n wants upper- and lower-case letters and a digit)
 abc = string.ascii_letters + string.digits
 s.setdefault("n8n_owner_password", "Jc7" + "".join(secrets.choice(abc) for _ in range(29)))
+for k in ("kuma_admin_password", "karakeep_owner_password"):
+    s.setdefault(k, "Jc7" + "".join(secrets.choice(abc) for _ in range(29)))
 fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
 json.dump(s, os.fdopen(fd, "w"), indent=1)
 PY

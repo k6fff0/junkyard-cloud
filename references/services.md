@@ -54,9 +54,21 @@ Container names (for `restartable`, `REQUIRED_DBS`, monitors and `docker logs`);
 - `docs.DOMAIN` → `127.0.0.1:8010` and `pdf.DOMAIN` → `127.0.0.1:8085`, both behind Access.
 - Paperless joins the assistant network as `paperless`; Stirling as `stirling`. OCR languages: the owner's
   (`PAPERLESS_OCR_LANGUAGE`, for example `ara+eng`).
-- Create the admin in `.env` (`PAPERLESS_ADMIN_USER` / `_PASSWORD`), then make the admin's API token in the web
-  page (profile → API token) and put it in the secrets file as `paperless_admin_token`. The installer creates the
-  document types, the expiry date field, the chat tags, a limited `assistant` user and the two archive workflows.
+- Create the admin in `.env` (`ADMIN_USER` / `ADMIN_PASSWORD`). The first start installs the OCR languages and
+  takes a minute or two. Then the admin's API token goes into the secrets file as `paperless_admin_token`, with no
+  browser and nothing printed:
+  ```
+  sudo python3 - <<'EOF'
+  import json, urllib.parse, urllib.request
+  env = dict(l.split("=", 1) for l in open("/opt/junkyard/paperless/.env").read().splitlines() if "=" in l and not l.startswith("#"))
+  data = urllib.parse.urlencode({"username": env["ADMIN_USER"].strip(), "password": env["ADMIN_PASSWORD"].strip()}).encode()
+  token = json.load(urllib.request.urlopen("http://127.0.0.1:8010/api/token/", data))["token"]
+  p = "/etc/junkyard/secrets.json"; s = json.load(open(p)); s["paperless_admin_token"] = token
+  json.dump(s, open(p, "w"), indent=1); print("paperless_admin_token saved")
+  EOF
+  ```
+  The installer (`assistant.md`, section 6) creates the document types, the expiry date field, the chat tags, a
+  limited `assistant` user and the two archive workflows, and gives the file bridge its token.
 - Stirling: no login (it is only reached through Access and by the file bridge); it runs some heavy tools, so it
   gets a 2 GB memory limit.
 - Check: upload a PDF on the web, it is read (OCR) and the owner gets the assistant's summary in chat.
@@ -75,8 +87,10 @@ Container names (for `restartable`, `REQUIRED_DBS`, monitors and `docker logs`);
 
 - `links.DOMAIN` → `127.0.0.1:3010`, behind Access (the phone app takes the service token headers). n8n reaches it
   at `http://172.17.0.1:3010`. Isolated network `karakeep`: it opens every saved link, so it must never reach the LAN.
-- Signups off after the owner's account exists; an API key for n8n (settings → API keys) goes in the secrets
-  file as `karakeep_token`. AI tags and summaries use the cheap model in `.env`.
+- Start with `DISABLE_SIGNUPS=false` (it is behind Access), make the owner's account and the assistant's key
+  with `sudo python3 /opt/junkyard/src/tools/karakeep-setup.py --email <owner email> --name <owner name>`
+  (saves `karakeep_owner_password` and `karakeep_token` in the secrets file), then `DISABLE_SIGNUPS=true` and
+  `docker compose up -d`. AI tags and summaries use the cheap model in `.env`.
 - Check: "save this <link>" in chat, then "find the link about <topic>".
 
 ## Smart home: Home Assistant (`homeassistant`)
