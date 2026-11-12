@@ -13,13 +13,12 @@ trap cleanup EXIT
 cp -r "$REPO/components/filebridge" "$HERE/filebridge"
 cd "$HERE"
 docker compose up -d --build >/dev/null 2>&1
-echo "waiting for n8n..."
-for i in $(seq 1 120); do curl -s http://127.0.0.1:15679/rest/settings | grep -q '"data"' && break; sleep 2; done
+printf '{"n8n_owner_password": "Owner-pass-1234567890"}' > "$WORK/boot.json"
+# bootstrap waits for n8n by itself (n8n answers /healthz long before its API is ready)
+python3 "$REPO/installer/jc_n8n.py" bootstrap --n8n http://127.0.0.1:15679 --email owner@example.com \
+  --secrets "$WORK/boot.json" --out "$WORK/key"
 docker compose exec -T db psql -q -U jc -d assistant < "$REPO/workflows/schema.sql"
 docker compose exec -T db psql -q -U jc -d assistant < "$REPO/workflows/schema.sql" 2>/dev/null   # safe to run twice
-printf 'Owner-pass-1234567890' > "$WORK/pw"
-python3 "$REPO/installer/jc_n8n.py" bootstrap --n8n http://127.0.0.1:15679 --email owner@example.com \
-  --password-file "$WORK/pw" --out "$WORK/key"
 ssh-keygen -q -t ed25519 -N '' -f "$WORK/ops" >/dev/null
 python3 "$HERE/make_config.py" "$WORK"
 I="python3 $REPO/installer/jc_n8n.py"

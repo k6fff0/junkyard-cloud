@@ -1,0 +1,16 @@
+# Throwaway Paperless (the version the template pins) for the installer's archive test. See run.sh.
+name: jc-archive-test
+services:
+  broker:
+    image: docker.io/valkey/valkey:9-alpine
+  paperless:
+    image: ghcr.io/paperless-ngx/paperless-ngx:3.3.3
+    depends_on: [broker]
+    environment:
+      PAPERLESS_REDIS: redis://broker:6379
+      PAPERLESS_SECRET_KEY: archive-test-secret-key-0123456789abcdef
+      PAPERLESS_ADMIN_USER: admin
+      PAPERLESS_ADMIN_PASSWORD: Admin-test-pass-123
+      PAPERLESS_ALLOWED_HOSTS: localhost,127.0.0.1
+      PAPERLESS_OCR_LANGUAGE: eng
+    ports: ["127.0.0.1:18010:8000"]

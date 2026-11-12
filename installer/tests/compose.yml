@@ -26,7 +26,7 @@ services:
   n8n:
     image: n8nio/n8n:2.42.6
     environment:
-      N8N_SECURE_COOKIE: "false"
+      N8N_PROTOCOL: https     # as in the real template: the login cookie is Secure, and bootstrap must cope
       N8N_DIAGNOSTICS_ENABLED: "false"
       N8N_PERSONALIZATION_ENABLED: "false"
       GENERIC_TIMEZONE: Europe/Lisbon

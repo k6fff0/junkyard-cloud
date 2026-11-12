@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Installs the assistant into n8n: credentials, the archive's types and fields, and every workflow, wired together.
 
-  jc_n8n.py bootstrap --n8n URL --email E --password-file F --out KEYFILE
-        first start of a fresh n8n: creates the owner account and an API key (saved to KEYFILE, mode 600)
+  jc_n8n.py bootstrap --n8n URL --email E --secrets S --out KEYFILE
+        first start of a fresh n8n: waits for it, creates the owner account (password: n8n_owner_password in the
+        secrets file, or --password-file) and an API key (saved to KEYFILE, mode 600)
   jc_n8n.py render  --config C --out DIR
         writes the final workflows to DIR without touching anything (to review them)
   jc_n8n.py install --config C --secrets S [--state STATE]
@@ -14,11 +15,13 @@ See config.example.json and secrets.example.json.
 """
 import argparse
 import copy
-import http.cookiejar
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -280,8 +283,9 @@ def plan(cfg, extra=None):
 class N8n:
     def __init__(self, base, key=None):
         self.base, self.key = base.rstrip("/"), key
-        self.jar = http.cookiejar.CookieJar()
-        self.opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(self.jar))
+        # Cookies are kept by hand: n8n marks its login cookie Secure (N8N_PROTOCOL=https), and a cookie jar never
+        # sends a Secure cookie to http://127.0.0.1, so the login would be lost before the API key is made.
+        self.cookies = {}
 
     def call(self, method, path, body=None, ok=(200, 201)):
         data = json.dumps(body).encode() if body is not None else None
@@ -289,12 +293,16 @@ class N8n:
                                      headers={"Content-Type": "application/json", "Accept": "application/json"})
         if self.key and path.startswith("/api/"):
             req.add_header("X-N8N-API-KEY", self.key)
+        if self.cookies:
+            req.add_header("Cookie", "; ".join("%s=%s" % kv for kv in self.cookies.items()))
         try:
-            with self.opener.open(req, timeout=60) as r:
-                raw = r.read()
-                status = r.status
+            with urllib.request.urlopen(req, timeout=60) as r:
+                raw, status, headers = r.read(), r.status, r.headers
         except urllib.error.HTTPError as e:
-            raw, status = e.read(), e.code
+            raw, status, headers = e.read(), e.code, e.headers
+        for c in headers.get_all("Set-Cookie") or []:
+            name, _, value = c.split(";", 1)[0].partition("=")
+            self.cookies[name.strip()] = value.strip()
         try:
             out = json.loads(raw or b"{}")
         except ValueError:
@@ -303,11 +311,38 @@ class N8n:
             raise Fail("n8n %s %s -> %s: %s" % (method, path, status, json.dumps(out)[:400]))
         return out
 
+    def wait_ready(self, seconds=300):
+        """/healthz answers long before the REST API is ready ("n8n is starting up"), so wait for the settings."""
+        end, last = time.time() + seconds, ""
+        while True:
+            try:
+                out = self.call("GET", "/rest/settings")
+                if isinstance(out.get("data"), dict) and "userManagement" in out["data"]:
+                    return out["data"]
+                last = json.dumps(out)[:200]
+            except (Fail, OSError) as e:
+                last = str(e)[:200]
+            if time.time() > end:
+                raise Fail("n8n at %s was not ready after %d s: %s" % (self.base, seconds, last))
+            time.sleep(3)
+
+
+def good_password(pw):
+    """n8n's rule for the owner password: 8 to 64 characters, upper- and lower-case letters and a digit."""
+    return 8 <= len(pw) <= 64 and re.search(r"\d", pw) and re.search(r"[A-Z]", pw) and re.search(r"[a-z]", pw)
+
 
 def bootstrap(a):
+    if a.password_file:
+        password = open(a.password_file, encoding="utf-8").read().strip()
+    elif a.secrets:
+        password = load_json(a.secrets).get("n8n_owner_password") or ""
+    else:
+        raise Fail("give --secrets (with n8n_owner_password) or --password-file")
+    if not good_password(password):
+        raise Fail("the n8n owner password needs 8-64 characters with upper- and lower-case letters and a digit")
     n = N8n(a.n8n)
-    password = open(a.password_file, encoding="utf-8").read().strip()
-    settings = n.call("GET", "/rest/settings")["data"]
+    settings = n.wait_ready()
     if settings["userManagement"].get("showSetupOnFirstLoad"):
         n.call("POST", "/rest/owner/setup", {"email": a.email, "firstName": a.first_name, "lastName": a.last_name,
                                               "password": password})
@@ -368,10 +403,13 @@ def credential(name, cfg, sec):
 
 
 # ---------------------------------------------------------------- Paperless (archive)
+PAPERLESS_API = 9    # Paperless-ngx 2.x and 3.x accept 9; the template pins 3.3.3, which refuses 7 and older (406)
+
+
 def http_json(method, url, token, body=None, ok=(200, 201)):
     req = urllib.request.Request(url, data=json.dumps(body).encode() if body is not None else None, method=method,
                                  headers={"Authorization": "Token " + token, "Content-Type": "application/json",
-                                          "Accept": "application/json; version=7"})
+                                          "Accept": "application/json; version=%d" % PAPERLESS_API})
     try:
         with urllib.request.urlopen(req, timeout=60) as r:
             status, raw = r.status, r.read()
@@ -383,11 +421,42 @@ def http_json(method, url, token, body=None, ok=(200, 201)):
 
 
 def ensure(base, token, kind, name, body):
+    """Finds or makes a shared object. Made with the admin token, Paperless would give it to the admin, and the
+    limited assistant user could not see it (403 on the first photo): so the owner is always empty."""
     found = http_json("GET", "%s/api/%s/?name__iexact=%s" % (base, kind, urllib.parse.quote(name)), token)
     hits = [x for x in found.get("results") or [] if x["name"].lower() == name.lower()]
-    if hits:
-        return hits[0]["id"]
-    return http_json("POST", "%s/api/%s/" % (base, kind), token, dict(body, name=name))["id"]
+    if not hits:
+        return http_json("POST", "%s/api/%s/" % (base, kind), token, dict(body, name=name, owner=None))["id"]
+    if hits[0].get("owner") is not None:
+        http_json("PATCH", "%s/api/%s/%s/" % (base, kind, hits[0]["id"]), token, {"owner": None})
+    return hits[0]["id"]
+
+
+def bridge_token(path, token):
+    """Puts the assistant's archive token into the file bridge's env file and recreates the bridge.
+    Returns what happened, for the installer's output."""
+    if not path or not os.path.exists(path):
+        return "file bridge env %s not found: set PAPERLESS_TOKEN there by hand (paperless_token)" % path
+    lines = open(path, encoding="utf-8").read().splitlines()
+    want = "PAPERLESS_TOKEN=" + token
+    if want in lines:
+        return "file bridge already has the archive token"
+    lines = [x for x in lines if not x.startswith("PAPERLESS_TOKEN=")] + [want]
+    mode = os.stat(path).st_mode & 0o777
+    tmp = path + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+    with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(lines) + "\n")
+    os.replace(tmp, path)
+    folder = os.path.dirname(os.path.abspath(path))
+    if shutil.which("docker") and os.path.exists(os.path.join(folder, "compose.yml")):
+        r = subprocess.run(["docker", "compose", "up", "-d", "filebridge"], cwd=folder,
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        if r.returncode:
+            raise Fail("the archive token was written to %s, but recreating the file bridge failed: %s"
+                       % (path, r.stdout.strip()[-300:]))
+        return "archive token written to the file bridge, bridge recreated"
+    return "archive token written to %s: recreate the bridge (docker compose up -d filebridge)" % path
 
 
 ASSISTANT_PERMS = ["view_document", "add_document", "change_document", "view_documenttype", "view_tag",
@@ -438,6 +507,8 @@ def archive_setup(cfg, sec, locale, secrets_path):
             http_json("PUT", "%s/api/workflows/%s/" % (base, flows[name]["id"]), admin, body)
         else:
             http_json("POST", base + "/api/workflows/", admin, body)
+    print("archive:", bridge_token(cfg.get("filebridge_env", "/opt/junkyard/assistant/filebridge.env"),
+                                   sec["paperless_token"]))
     return {"EXPIRY_FIELD": field, "TAG_TELEGRAM": tags["telegram"], "TAG_WHATSAPP": tags["whatsapp"]}
 
 
@@ -523,7 +594,8 @@ def main(argv=None):
     b = sub.add_parser("bootstrap")
     b.add_argument("--n8n", default="http://127.0.0.1:5678")
     b.add_argument("--email", required=True)
-    b.add_argument("--password-file", required=True)
+    b.add_argument("--secrets", help="the secrets file (n8n_owner_password is read from it)")
+    b.add_argument("--password-file", help="a file holding only the password (instead of --secrets)")
     b.add_argument("--first-name", default="Owner")
     b.add_argument("--last-name", default="Server")
     b.add_argument("--out", required=True)
