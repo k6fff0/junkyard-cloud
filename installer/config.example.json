@@ -27,6 +27,7 @@
            "docs": "https://docs.example.com", "links": "https://links.example.com",
            "downloads": "https://download.example.com", "files": "https://files.example.com"},
   "paperless_admin_url": "http://127.0.0.1:8010",
+  "filebridge_env": "/opt/junkyard/assistant/filebridge.env",
   "assistant_db": {"host": "n8n-postgres", "port": 5432, "database": "assistant", "user": "assistant"},
   "ssh_ops": {"host": "172.17.0.1", "port": 22, "user": "root"},
   "restartable": ["immich_server", "vaultwarden", "homepage", "waha"],

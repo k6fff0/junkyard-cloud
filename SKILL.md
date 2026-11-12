@@ -43,7 +43,8 @@ generalized and tested. Install it, configure it, and test it. Do not rewrite it
 
 ## What you need from the owner
 
-- a PC that can run all day (4 GB RAM minimum, 8+ for photos and documents; a second disk for data is best)
+- a PC that can run all day (4 GB RAM minimum, 8+ for documents, 16 for photos; a system disk of 64 GB or more,
+  and a second disk for data is best)
 - a domain on Cloudflare (free plan) and access to that Cloudflare account
 - an email address for the login codes
 - for the assistant: an OpenAI API key (an API account, not a ChatGPT subscription; with the cheap models

@@ -17,8 +17,23 @@ Each line here broke something on the real server this skill comes from. They ar
   PC turning on and off every few seconds, try without the battery (the clock is fixed by NTP after boot).
 - **Disk space:** Docker build caches grow with every rebuild (1 GB per deploy was seen). Show the owner
   `docker system df`; clean only when they ask (`docker builder prune`), never on a schedule they did not choose.
+- **sshd keeps the first value it reads.** A drop-in named after `50-cloud-init.conf` changes nothing; the test
+  build reported "passwords off" while they still worked. Name it `00-...` and prove it with `sudo sshd -T`.
+- **No swap = no warning.** On a small machine a peak does not slow things down, it kills them: n8n lost its
+  database and the owner's message got no answer at all. Swap always; and say it before installing too much.
+- **Docker makes a missing bind folder as root.** n8n (uid 1000), the file bridge (10002), aria2 and the
+  downloads bridge (10001) and the file browser then stop in a loop. Make each folder with its owner first.
+- **A system image that includes Docker's images** is 25 GB, takes 22 minutes, and starves the machine while it
+  runs. Images are pulled again from the pinned versions; leave them out and run the image job at idle priority.
 
 ## Scripts and cron
+- **"OK" must mean delivered.** Every send in the notification workflow continues on error, so a dead WhatsApp
+  answered "ok" and the reminder was deleted. The answer says which channels delivered, and a reminder is kept
+  until one did.
+- **A lock taken before a step that can fail must be released when it fails**: a failed upload kept a file
+  "being archived" for 15 minutes, and the owner's resend was refused.
+- **A service that waits for another must never give up**: after a reboot Stirling-PDF took 4 minutes, the
+  file bridge stopped trying after 150 s, and every file tool was dead until someone restarted it.
 - **A script rewritten with `mv` loses its execute bit**, and cron skips it silently: the off-site copy did not run
   one night and nobody was told. Always `install -m 755` or `chmod 755` after `mv`, and make every scheduled job
   report failure (the backup scripts do).
@@ -26,9 +41,16 @@ Each line here broke something on the real server this skill comes from. They ar
 - **Edits that contain quotes or expressions** (n8n code, JSON) go through a file you upload, never inline in an
   SSH command: quoting broke a live workflow for a minute.
 
+- **`curl` and Python's cookie jar never send a `Secure` cookie to `http://127.0.0.1`.** Apps whose public
+  address is https (n8n, Karakeep) set their login cookie Secure: scripts on the server keep it by hand.
+- **Tests with fakes hide what the fake does not check**: a fake Paperless accepted an API version the real one
+  refuses, and had no object permissions. The archive setup is now tested against the real image.
+
 ## Cloudflare
 - **Vaultwarden and Jellyfin cannot sit behind Access**: their apps never show the email page. Protect them as in
-  `cloudflare.md`.
+  `cloudflare.md`, and never open Vaultwarden's signups: the owner's email is invited (`services.md`).
+- **A container cannot reach a port published on 172.17.0.1 from its own network** (Docker leaves that traffic to
+  the host, and ufw drops it): containers in the same compose talk by name.
 - **A Home Assistant behind the tunnel answers 400** until `trusted_proxies` includes `127.0.0.1` and `::1`.
 - **Home Assistant (2026.x) stores `http:` settings in `.storage/http` after the first start**, ignores the YAML,
   and rolls back a change that is not confirmed in its web page within five minutes. Set `http:` before the first
