@@ -33,7 +33,7 @@ def later(minutes=60):
 
 class Base(unittest.TestCase):
     def setUp(self):
-        self.received, self.fail_notify = [], False
+        self.received, self.fail_notify, self.undelivered = [], False, False
         test = self
 
         class Notify(BaseHTTPRequestHandler):
@@ -44,10 +44,18 @@ class Base(unittest.TestCase):
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 if test.fail_notify or self.headers.get("X-Notify-Secret") != "s" * 32:
                     self.send_response(500)
-                else:
+                    self.end_headers()
+                    return
+                # like Notify Me: 200 with ok=false when no channel delivered (WhatsApp down)
+                out = {"ok": False, "delivered": ""} if test.undelivered else {"ok": True, "delivered": "whatsapp"}
+                if not test.undelivered:
                     test.received.append(body)
-                    self.send_response(200)
+                raw = json.dumps(out).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(raw)))
                 self.end_headers()
+                self.wfile.write(raw)
         self.srv = ThreadingHTTPServer(("127.0.0.1", 0), Notify)
         threading.Thread(target=self.srv.serve_forever, daemon=True).start()
         with open(os.path.join(TMP, "secret"), "w") as f:
@@ -160,6 +168,17 @@ class Firing(Base):
         self.say("fire-reminders")
         self.assertEqual(len(ops.load()["items"]), 1)
         self.fail_notify = False
+        self.say("fire-reminders")
+        self.assertEqual(ops.load()["items"], [])
+
+    def test_kept_when_no_channel_delivered(self):
+        past = (datetime.datetime.now() - datetime.timedelta(minutes=1)).isoformat(timespec="minutes")
+        self.due({"when": past, "text": "Call the bank"})
+        self.undelivered = True                      # n8n took it, but WhatsApp was down
+        self.say("fire-reminders")
+        self.assertEqual(len(ops.load()["items"]), 1)
+        self.assertIn("not delivered", open(ops.LOG, encoding="utf-8").read())
+        self.undelivered = False
         self.say("fire-reminders")
         self.assertEqual(ops.load()["items"], [])
 

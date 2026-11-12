@@ -14,14 +14,14 @@ OWNER = "15550001111@c.us"
 passed, failed = 0, []
 
 
-def post(url, body, headers=None):
+def post(url, body, headers=None, answer=False):
     req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST",
                                  headers={"Content-Type": "application/json", **(headers or {})})
     try:
         with urllib.request.urlopen(req, timeout=60) as r:
-            return r.status
+            return (r.status, json.loads(r.read() or b"{}")) if answer else r.status
     except urllib.error.HTTPError as e:
-        return e.code
+        return (e.code, {}) if answer else e.code
 
 
 def log():
@@ -77,14 +77,26 @@ print("scenarios:")
 # 1. a server script notifies the owner
 reset()
 check("notify needs its secret", post(N8N + "notify", {"title": "x"}) == 403)
-check("notify accepted", post(N8N + "notify", {"title": "Backup", "message": "Nightly backup failed",
-                                                "priority": "normal"}, NOTIFY) == 200)
+code, out = post(N8N + "notify", {"title": "Backup", "message": "Nightly backup failed", "priority": "normal"},
+                 NOTIFY, answer=True)
+check("notify accepted, says it was delivered", code == 200 and out.get("ok") is True
+      and out.get("delivered") == "whatsapp", (code, out))
 hit = wait_for(lambda e: e["kind"] == "wa_text")
 check("notify reaches WhatsApp", hit and hit[0]["body"]["text"].startswith("🔔 *Backup*\n\nNightly backup failed"),
       hit and hit[0]["body"])
 check("notification is remembered by the assistant",
       "[Notification sent to Sam" in sql("SELECT string_agg(message->>'content', ' ') FROM jc_assistant_memory "
                                          "WHERE session_id='owner'"))
+
+# 1b. WhatsApp is down: Notify Me must say so (a reminder is then kept by jc-ops, not dropped)
+reset()
+post(FAKE + "_wa_down", {"down": True})
+code, out = post(N8N + "notify", {"title": "Reminder", "message": "Call the bank", "priority": "important",
+                                  "channels": ["whatsapp"]}, NOTIFY, answer=True)
+check("notify says not delivered when WhatsApp is down", code == 200 and out.get("ok") is False
+      and out.get("delivered") == "", (code, out))
+check("the send was really tried", bool(wait_for(lambda e: e["kind"] == "wa_text_refused", 10)))
+reset()
 
 # 2. "remember ..." on WhatsApp: bridge -> assistant -> add_note tool -> database -> reply
 reset()

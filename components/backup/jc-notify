@@ -1,14 +1,27 @@
 #!/bin/sh
 # jc-notify <title> <message> [priority]   - tell the owner through the assistant's Notify Me webhook.
 # priority: normal | important | emergency (emergency may call their phone). Never fails the caller.
+# When the message could not be delivered (no assistant yet, n8n down, every channel down), it is written to
+# $JC_NOTIFY_LOG (default /var/log/jc-notify.log) and to stderr, so it is never lost silently.
 CONF=${JC_CONF:-/etc/junkyard}
+LOG=${JC_NOTIFY_LOG:-/var/log/jc-notify.log}
 URL=$(cat "$CONF/notify-url" 2>/dev/null || echo http://127.0.0.1:5678/webhook/notify)
 SECRET=$(cat "$CONF/notify-secret" 2>/dev/null || true)
-[ -n "$SECRET" ] || { echo "jc-notify: no $CONF/notify-secret" >&2; exit 0; }
-python3 - "$1" "$2" "${3:-important}" > "${TMPDIR:-/tmp}/jc-notify.$$" <<'PY'
+TMP=${TMPDIR:-/tmp}/jc-notify.$$
+undelivered() {
+  line="$(date '+%Y-%m-%d %H:%M') NOT DELIVERED ($1): $2 | $3"
+  echo "jc-notify: $line" >&2
+  echo "$line" >> "$LOG" 2>/dev/null || true
+  rm -f "$TMP" "$TMP.out"
+  exit 0
+}
+[ -n "$SECRET" ] || undelivered "no $CONF/notify-secret" "$1" "$2"
+python3 - "$1" "$2" "${3:-important}" > "$TMP" <<'PY'
 import json, sys
 print(json.dumps({"title": sys.argv[1], "message": sys.argv[2], "priority": sys.argv[3]}))
 PY
-curl -s -m 20 -o /dev/null -X POST "$URL" -H "X-Notify-Secret: $SECRET" -H "Content-Type: application/json" \
-  --data-binary "@${TMPDIR:-/tmp}/jc-notify.$$" || true
-rm -f "${TMPDIR:-/tmp}/jc-notify.$$"
+code=$(curl -s -m 60 -o "$TMP.out" -w '%{http_code}' -X POST "$URL" -H "X-Notify-Secret: $SECRET" \
+  -H "Content-Type: application/json" --data-binary "@$TMP" || true)
+[ "$code" = 200 ] || undelivered "n8n answered ${code:-nothing}" "$1" "$2"
+grep -q '"ok": *true' "$TMP.out" || undelivered "no channel delivered: $(head -c 200 "$TMP.out")" "$1" "$2"
+rm -f "$TMP" "$TMP.out"

@@ -7,6 +7,7 @@ OpenAI behaviour (chat completions, also streamed):
 - a json_schema response is asked for (mail triage)         -> {"category": "important", ...}
 - anything else                                             -> "Hello from the fake model."
 GET /_log returns everything received; POST /_reset clears it.
+POST /_wa_down {"down": true} makes sendText answer 422 like an unpaired WAHA session (until /_reset).
 """
 import json
 import time
@@ -14,6 +15,7 @@ import time
 from aiohttp import web
 
 LOG = []
+STATE = {"wa_down": False}
 
 
 def record(kind, body):
@@ -24,6 +26,9 @@ async def wa_text(req):
     if req.headers.get("X-Api-Key") != "waha-test-key":
         return web.json_response({"error": "bad key"}, status=401)
     b = await req.json()
+    if STATE["wa_down"]:
+        record("wa_text_refused", b)
+        return web.json_response({"statusCode": 422, "message": "Session status is not as expected"}, status=422)
     record("wa_text", b)
     return web.json_response({"id": "true_%s_OUT%d" % (b.get("chatId"), len(LOG))})
 
@@ -155,11 +160,18 @@ async def get_log(req):
 
 async def reset(req):
     LOG.clear()
+    STATE["wa_down"] = False
+    return web.json_response({"ok": True})
+
+
+async def wa_down(req):
+    STATE["wa_down"] = bool((await req.json()).get("down"))
     return web.json_response({"ok": True})
 
 
 app = web.Application(client_max_size=50 * 1024 * 1024)
 app.add_routes([web.post("/api/sendText", wa_text), web.get("/api/{session}/lids/pn/{phone}", wa_lid),
                 web.post("/v1/chat/completions", chat), web.post("/v1/responses", responses), web.get("/_log", get_log), web.post("/_reset", reset),
+                web.post("/_wa_down", wa_down),
                 web.route("*", "/{tail:.*}", other)])
 web.run_app(app, port=9000, access_log=None)

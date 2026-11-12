@@ -201,8 +201,11 @@ def fire_reminders(c):
         req = urllib.request.Request(c["notify_url"], data=body, method="POST",
                                      headers={"X-Notify-Secret": secret, "Content-Type": "application/json"})
         try:
-            urllib.request.urlopen(req, timeout=20).read()
-            # moved on only once n8n took it; otherwise it is tried again next minute
+            with urllib.request.urlopen(req, timeout=60) as r:
+                answer = json.loads(r.read() or b"{}")
+            # moved on only once a channel really delivered it; otherwise it is tried again next minute
+            if answer.get("ok") is not True:
+                raise RuntimeError("not delivered (channels down?): %s" % json.dumps(answer)[:200])
             step = REPEATS.get(i.get("repeat", "none"))
             if step:
                 nxt = datetime.datetime.fromisoformat(i["when"])
