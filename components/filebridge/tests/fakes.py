@@ -53,6 +53,8 @@ class Fake:
         self.stirling_calls = []   # (path, [file names], {fields})
         self.openai_calls = []
         self.task_status = "SUCCESS"
+        self.upload_fails = False   # Paperless refuses the upload
+        self.stirling_down = 0      # Stirling answers 503 to the next N catalog requests (still starting)
         self.lid_lookups = 0
         self.app = web.Application(client_max_size=200 * 1024 * 1024)
         r = self.app.router
@@ -76,6 +78,9 @@ class Fake:
         r.add_post("/v1/chat/completions", self.openai)
 
     async def api_docs(self, req):
+        if self.stirling_down:
+            self.stirling_down -= 1
+            return web.Response(status=503)
         return web.json_response(openapi())
 
     # ---- WAHA ----
@@ -109,6 +114,8 @@ class Fake:
 
     async def pl_post(self, req):
         assert req.headers.get("Authorization") == "Token pl-token"
+        if self.upload_fails:
+            return web.json_response({"detail": "You do not have permission"}, status=403)
         form = await req.post()
         f = form["document"]
         data = f.file.read()

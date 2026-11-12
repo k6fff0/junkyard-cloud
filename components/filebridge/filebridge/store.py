@@ -152,3 +152,8 @@ class Store:
         self.db.execute("INSERT OR REPLACE INTO archived (sha, ts, ref) VALUES (?,?,?)", (sha, time.time(), ref))
         self.db.commit()
         return None
+
+    def stop_archiving(self, sha):
+        """The upload or the reading failed: the owner may send the same file again at once."""
+        self.db.execute("DELETE FROM archived WHERE sha=?", (sha,))
+        self.db.commit()

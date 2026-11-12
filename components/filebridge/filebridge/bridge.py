@@ -231,6 +231,9 @@ class Bridge:
     async def run(self, operation, a):
         if not self.cfg.stirling:
             return "File tools are not set up on this server."
+        if not await self.need_catalog():
+            return ("The file tools (Stirling-PDF) are not answering right now; it may still be starting. "
+                    "Try again in a minute.")
         op = self.catalog.get((operation or "").strip().strip("/"))
         if not op:
             return "Unknown operation %r. Use pdf_operations to find the exact name." % operation
@@ -335,7 +338,7 @@ class Bridge:
         self._tags[name] = tid
         return tid
 
-    async def check_task(self, task_id, channel):
+    async def check_task(self, task_id, channel, sha=None):
         await asyncio.sleep(self.cfg.archive_check_delay)
         try:
             async with self.s.get("%s/api/tasks/" % self.cfg.paperless_url, params={"task_id": task_id},
@@ -343,6 +346,8 @@ class Bridge:
                 j = await r.json(content_type=None)
             t = j[0] if isinstance(j, list) and j else (j.get("results") or [None])[0] if isinstance(j, dict) else None
             if t and str(t.get("status", "")).upper() == "FAILURE":
+                if sha:
+                    self.store.stop_archiving(sha)
                 await self.say(channel, self.t("archive_failed", error=str(t.get("result", ""))[:300]))
         except Exception as e:
             log("check_task", repr(e))
@@ -357,6 +362,13 @@ class Bridge:
         if busy:
             log("archive skip (in progress)", ref, "same as", busy)
             return "%s is the same file as %s, which is already being archived. Nothing else to do." % (ref, busy)
+        try:
+            return await self._archive(ref, hint, channel, name, data, mime, sha)
+        except BaseException:
+            self.store.stop_archiving(sha)     # a failed try must not block the next one for 15 minutes
+            raise
+
+    async def _archive(self, ref, hint, channel, name, data, mime, sha):
         async with self.s.get(self.cfg.paperless_url + "/api/documents/",
                               params={"checksum__iexact": sha, "fields": "id,title"}, headers=self.pl_headers()) as r:
             found = (await r.json(content_type=None)).get("results") or []
@@ -377,7 +389,7 @@ class Bridge:
             if r.status >= 300:
                 raise ValueError("archive upload failed: %s" % task[:200])
         await self.say(channel, self.t("archiving"))
-        asyncio.get_running_loop().create_task(self.check_task(task, channel))
+        asyncio.get_running_loop().create_task(self.check_task(task, channel, sha))
         log("archive", ref, channel)
         return "Archiving started for %s. %s will get a message with the saved document when it is read." % (
             ref, self.cfg.owner)
@@ -708,6 +720,7 @@ class Bridge:
             a = {}
         try:
             if action == "ops":
+                await self.need_catalog()
                 res = catalog_mod.describe(self.catalog, arg1)
             elif action == "recent":
                 res = self.recent()
@@ -734,16 +747,33 @@ class Bridge:
                                   "archive": self.cfg.archive})
 
     # ---------------- life cycle ----------------
-    async def load_catalog(self, attempts=30, delay=5):
-        for _ in range(attempts):
-            try:
-                async with self.s.get(self.cfg.stirling_url + "/v1/api-docs") as r:
-                    self.catalog = catalog_mod.parse(await r.json(content_type=None))
-                log("catalog", len(self.catalog), "operations")
-                return
-            except Exception as e:
-                log("catalog retry", repr(e))
-                await asyncio.sleep(delay)
+    async def fetch_catalog(self):
+        """One try at Stirling's list of operations. True when it is loaded."""
+        try:
+            async with self.s.get(self.cfg.stirling_url + "/v1/api-docs", timeout=ClientTimeout(total=30)) as r:
+                if r.status != 200:
+                    raise ValueError("HTTP %d" % r.status)
+                catalog = catalog_mod.parse(await r.json(content_type=None))
+        except Exception as e:
+            log("catalog not loaded", repr(e))
+            return False
+        if not catalog:
+            return False
+        self.catalog = catalog
+        log("catalog", len(catalog), "operations")
+        return True
+
+    async def load_catalog(self, delay=5, longest=60):
+        """Stirling can take minutes to start after a reboot: keep trying (never give up), more slowly over time."""
+        while not await self.fetch_catalog():
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, longest)
+
+    async def need_catalog(self):
+        """Loads the catalog on demand if the background loader has not managed yet."""
+        if not self.catalog:
+            await self.fetch_catalog()
+        return bool(self.catalog)
 
     async def start(self, app):
         self.s = ClientSession(timeout=ClientTimeout(total=120))

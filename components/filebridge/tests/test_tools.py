@@ -1,4 +1,5 @@
 """The assistant's file tools, Telegram, settings and the operations catalog."""
+import asyncio
 import json
 import unittest
 
@@ -93,6 +94,23 @@ class ToolsTest(BridgeTest):
         j = await r.json()
         self.assertTrue(j["ok"] and j["whatsapp"] and j["telegram"] and j["archive"])
         self.assertGreater(j["operations"], 0)
+
+
+class SlowStirlingTest(BridgeTest):
+    """After a reboot Stirling took 4 minutes; the bridge gave up after 150 s and every file tool failed."""
+    async def test_catalog_is_loaded_on_demand_and_never_given_up(self):
+        self.bridge.catalog = {}
+        self.fake.stirling_down = 1
+        r = await self.tool("run", "convert/pdf/word", '{"ref":"f1"}')
+        self.assertIn("not answering right now", r["result"])        # honest, not "Unknown operation"
+        await self.tool("ops", "convert")                             # Stirling is up now: loaded on demand
+        self.assertTrue(self.bridge.catalog)
+
+    async def test_background_loader_keeps_trying(self):
+        self.bridge.catalog = {}
+        self.fake.stirling_down = 3
+        await asyncio.wait_for(self.bridge.load_catalog(delay=0.01, longest=0.02), 5)
+        self.assertTrue(self.bridge.catalog)
 
 
 class TelegramTest(BridgeTest):

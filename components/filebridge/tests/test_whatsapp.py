@@ -101,6 +101,24 @@ class WhatsAppTest(BridgeTest):
         r = await self.tool("archive", "f2", '{"channel":"whatsapp"}')
         self.assertIn("already being archived", r["result"])
 
+    async def test_failed_upload_does_not_block_sending_it_again(self):
+        # a failed upload left a 15-minute "being archived" lock, and the resend was refused (2026-11-11)
+        self.fake.upload_fails = True
+        await self.wa(wa(self.fake, 1, file=PDF, mime="application/pdf", filename="a.pdf"))
+        self.assertEqual(self.fake.docs, [])
+        self.fake.upload_fails = False
+        await self.wa(wa(self.fake, 2, file=PDF, mime="application/pdf", filename="a.pdf"))
+        self.assertEqual(len(self.fake.docs), 1)
+
+    async def test_file_the_archive_could_not_read_can_be_sent_again(self):
+        self.fake.task_status = "FAILURE"
+        await self.wa(wa(self.fake, 1, file=PDF, mime="application/pdf", filename="a.pdf"))
+        await self.settle()
+        self.fake.task_status = "SUCCESS"
+        self.fake.docs.clear()                      # Paperless did not keep the file it could not read
+        r = await self.tool("archive", "f1", '{"channel":"whatsapp"}')
+        self.assertIn("Archiving started", r["result"])
+
     async def test_already_archived_file_is_reported_with_link(self):
         await self.wa(wa(self.fake, 1, file=PDF, mime="application/pdf", filename="a.pdf"))
         self.bridge.store.db.execute("DELETE FROM archived")          # past the 15-minute window
