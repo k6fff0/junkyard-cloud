@@ -1,6 +1,6 @@
 ---
 name: junkyard-cloud
-description: Build a secure self-hosted home server (homelab) on an old PC, on the owner's own domain through Cloudflare Tunnel and Access, with nightly and off-site backups, monitoring, a dashboard, optional self-hosted services (photos, passwords, documents archive, media, downloads, saved links, smart home, file browser, staging for the owner's projects), and a personal AI assistant on WhatsApp or Telegram that saves documents, converts files, downloads videos, reminds and calls the owner. Use when someone wants a home server, homelab, self-hosted cloud, or a WhatsApp/Telegram assistant running on their own machine, or wants to add a service or the assistant to a server built with this skill.
+description: Build a secure self-hosted home server (homelab) on an old PC, on the owner's own domain through Cloudflare Tunnel and Access, with nightly and off-site backups, monitoring, a dashboard, optional self-hosted services (photos, passwords, documents archive, media, downloads, saved links, smart home, file browser, staging for the owner's projects), and a personal AI assistant on WhatsApp or Telegram that saves documents, converts files, downloads videos, reminds and calls the owner. Use when someone wants a home server, homelab, self-hosted cloud, or a WhatsApp/Telegram assistant running on their own machine, or wants to add a service or the assistant to a server built with this skill, update it, or remove it.
 ---
 
 # Junkyard Cloud
@@ -70,6 +70,9 @@ Work through these in order. Each step has its own reference file: read it when 
 | 9 | Prove it works, then hand over | `references/handover.md` |
 
 Steps 2 to 5 are not optional: they are what makes this a server and not a pile of containers.
+
+Later, on a server already built with this skill: updating its code or a service, removing a service, or
+removing everything is in `references/maintenance.md`.
 
 ## The menu (show it to the owner in step 1)
 
