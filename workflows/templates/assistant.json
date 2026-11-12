@@ -1122,7 +1122,7 @@
     480
    ],
    "parameters": {
-    "description": "Cancel one pending reminder by its numeric id (get ids from list_reminders).",
+    "description": "Cancel one pending reminder by its numeric id (get ids from list_reminders). Only when the owner's message asks to cancel or change that reminder; never for a reminder you have just added.",
     "workflowId": {
      "__rl": true,
      "value": "__WF:Guarded Action__",

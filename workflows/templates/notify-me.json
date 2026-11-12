@@ -221,7 +221,7 @@
        "id": "o",
        "name": "ok",
        "type": "boolean",
-       "value": "={{ (() => { const node = {telegram: 'Telegram', email: 'Email', whatsapp: 'WhatsApp', call: 'Phone call', ai_call: 'AI call'}; const sent = []; for (const c of $(\"Normalize\").first().json.channels) { try { const r = $(node[c]); if (r.isExecuted && r.all().length && !r.all().some(i => i.json.error)) sent.push(c); } catch (e) {} } return sent; })().length > 0 }}"
+       "value": "={{ (() => { const node = __JS:SEND_NODES__; const sent = []; for (const c of $(\"Normalize\").first().json.channels) { try { const r = $(node[c]); if (r.isExecuted && r.all().length && !r.all().some(i => i.json.error)) sent.push(c); } catch (e) {} } return sent; })().length > 0 }}"
       },
       {
        "id": "p",
@@ -239,7 +239,7 @@
        "id": "d",
        "name": "delivered",
        "type": "string",
-       "value": "={{ (() => { const node = {telegram: 'Telegram', email: 'Email', whatsapp: 'WhatsApp', call: 'Phone call', ai_call: 'AI call'}; const sent = []; for (const c of $(\"Normalize\").first().json.channels) { try { const r = $(node[c]); if (r.isExecuted && r.all().length && !r.all().some(i => i.json.error)) sent.push(c); } catch (e) {} } return sent; })().join(', ') }}"
+       "value": "={{ (() => { const node = __JS:SEND_NODES__; const sent = []; for (const c of $(\"Normalize\").first().json.channels) { try { const r = $(node[c]); if (r.isExecuted && r.all().length && !r.all().some(i => i.json.error)) sent.push(c); } catch (e) {} } return sent; })().join(', ') }}"
       }
      ]
     },

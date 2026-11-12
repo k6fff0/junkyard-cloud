@@ -32,6 +32,7 @@ WF_DIR = os.path.join(os.path.dirname(HERE), "workflows")
 CHANNEL_HELP = {"whatsapp": "whatsapp", "telegram": "telegram", "email": "email",
                 "call": "call (a voice reads the text)", "ai_call": "ai_call (a live call with you)"}
 APP_NAME = {"whatsapp": "WhatsApp", "telegram": "Telegram"}
+SEND_NODE = {"telegram": "Telegram", "email": "Email", "whatsapp": "WhatsApp", "call": "Phone call", "ai_call": "AI call"}
 UNSAFE = re.compile(r"['\"\\`{}\n\r]")
 
 
@@ -135,6 +136,8 @@ def values(cfg, on, locale):
         check_text(k.lower(), v[k])
     js = {
         "ASSISTANT": v["ASSISTANT"], "CHANNELS": channels, "CHAT_CHANNELS": chats,
+        # Notify Me's send node for each installed channel (it reports which ones really delivered)
+        "SEND_NODES": {c: SEND_NODE[c] for c in channels},
         "PRIORITY_CHANNELS": {"normal": [main], "important": important, "emergency": emergency},
         "DAYS": locale["days"], "MAIL_ALIASES": [a.lower() for a in cfg.get("mail_aliases") or []],
         "CALL_MONITORS": cfg.get("call_monitors") or [],
