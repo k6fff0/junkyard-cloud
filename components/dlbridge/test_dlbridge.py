@@ -7,7 +7,10 @@ import unittest
 import urllib.request
 from http.server import ThreadingHTTPServer
 
-import dlbridge as d
+# the tests expect English unless they ask for another language; inside the running container LANG_CODE may
+# be the owner's (4 tests failed with LANG_CODE=ar)
+os.environ["LANG_CODE"] = "en"
+import dlbridge as d  # noqa: E402
 
 
 def public(_host):

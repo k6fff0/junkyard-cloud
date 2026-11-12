@@ -46,6 +46,8 @@ for i in $(seq 1 60); do pgrep -f "/jc-backup$" >/dev/null || break; sleep 30; d
 DUMPS=$(ls -1d "$BACKUP_ROOT"/nightly/20??-??-??/databases 2>/dev/null | tail -1)
 mkdir -p /var/backups/jc-dbdumps && chmod 700 /var/backups/jc-dbdumps
 [ -n "$DUMPS" ] && rsync -a --delete "$DUMPS"/ /var/backups/jc-dbdumps/
+# the owner's language for alert texts: t "English" "العربية"
+t() { if [ "${LANG_CODE:-en}" = ar ]; then printf '%s' "$2"; else printf '%s' "$1"; fi; }
 FAIL=""
 # Left out: every active swap file (any name), and Docker's images and container layers (tens of GB, pulled or
 # built again from the pinned versions after a restore; named volumes are kept). Run gently: it reads the whole
@@ -57,9 +59,9 @@ SKIP=(--exclude /swap.img --exclude /var/cache/restic --exclude /lost+found --ex
 while read -r f; do [ -n "$f" ] && SKIP+=(--exclude "$f"); done < <(swapon --show=NAME,TYPE --noheadings 2>/dev/null | awk '$2=="file"{print $1}')
 nice -n 19 ionice -c 3 restic backup --tag system --host "$(hostname)" --one-file-system "${SKIP[@]}" \
   / /boot /boot/efi >> "$LOG" 2>&1
-rc=$?; [ $rc -eq 0 ] || [ $rc -eq 3 ] || FAIL="system rc=$rc"
+rc=$?; [ $rc -eq 0 ] || [ $rc -eq 3 ] || FAIL="$(t "system rc=$rc" "فشلت صورة النظام (restic rc=$rc)")"
 # 3) keep one snapshot only, and really free the old data
-[ -z "$FAIL" ] && { restic forget --tag system --keep-last 1 --prune >> "$LOG" 2>&1 || FAIL="prune"; }
+[ -z "$FAIL" ] && { restic forget --tag system --keep-last 1 --prune >> "$LOG" 2>&1 || FAIL="$(t "prune" "فشل حذف الصورة القديمة")"; }
 if [ -n "$FAIL" ]; then
   jc-backup-status "$STATUS" fail "$FAIL" "$SNAPSHOT_ENV" system
   if [ "${LANG_CODE:-en}" = ar ]; then jc-notify "⚠️ صورة قرص النظام" "فشلت: $FAIL - السجل: $LOG" important

@@ -13,6 +13,8 @@ mkdir -p "$(dirname "$LOG")" "$STATUS_DIR"
 exec 9>/run/jc-offsite.lock
 flock -n 9 || { echo "$(date '+%F %T') already running, skip" >> "$LOG"; exit 0; }
 log() { echo "$(date '+%F %T') $*" >> "$LOG"; }
+# the owner's language for alert texts: t "English" "العربية"
+t() { if [ "${LANG_CODE:-en}" = ar ]; then printf '%s' "$2"; else printf '%s' "$1"; fi; }
 alert() {
   if [ "${LANG_CODE:-en}" = ar ]; then jc-notify "⚠️ النسخة خارج المنزل" "$1 - السجل: $LOG" important
   else jc-notify "⚠️ Off-site backup" "$1 - log: $LOG" important; fi
@@ -26,13 +28,13 @@ PATHS=(); for p in $OFFSITE_PATHS; do [ -e "$p" ] && PATHS+=("$p"); done
 restic backup --one-file-system --tag nightly "${EX[@]}" "${PATHS[@]}" >> "$LOG" 2>&1
 rc=$?
 if [ $rc -ne 0 ] && [ $rc -ne 3 ]; then   # 3 = some files could not be read, the snapshot was still made
-  log "FAILED backup rc=$rc"; status fail "backup rc=$rc"; alert "restic backup rc=$rc"; exit 1
+  log "FAILED backup rc=$rc"; status fail "backup rc=$rc"; alert "$(t "restic backup rc=$rc" "فشل النسخ (restic rc=$rc)")"; exit 1
 fi
 restic forget --keep-daily 7 --keep-weekly 4 --keep-monthly 6 >> "$LOG" 2>&1
 if [ "$(date +%u)" = 7 ] || [ "${FORCE_CHECK:-0}" = 1 ]; then
-  restic prune >> "$LOG" 2>&1 || { log "prune failed"; alert "prune failed"; }
+  restic prune >> "$LOG" 2>&1 || { log "prune failed"; alert "$(t "prune failed" "فشل حذف النسخ القديمة")"; }
   restic check --read-data-subset=1/20 >> "$LOG" 2>&1 || {
-    log "CHECK FAILED"; status fail "check failed"; alert "the weekly check found a problem"; exit 1; }
+    log "CHECK FAILED"; status fail "check failed"; alert "$(t "the weekly check found a problem" "الفحص الأسبوعي وجد مشكلة")"; exit 1; }
 fi
 log "=== ok rc=$rc"
 status ok ""

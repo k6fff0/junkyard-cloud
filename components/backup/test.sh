@@ -68,6 +68,9 @@ docker stop pg >/dev/null
 if JC_DAY=2026-01-06 jc-backup; then no "ran without a required database"; fi
 grep -q '"status":"FAILED: database pg was not dumped' /backups/status/nightly.json && ok "missing required database fails the copy" || no "fail status"
 grep -q "Nightly backup failed" /tmp/notified && ok "the owner is alerted" || no "alert"
+rm -f /tmp/notified
+if LANG_CODE=ar JC_DAY=2026-01-06 jc-backup; then no "ran without a required database (ar)"; fi
+grep -q "فشل النسخ الاحتياطي الليلي|لم تُنسخ قاعدة البيانات pg" /tmp/notified && ok "an Arabic owner gets the reason in Arabic" || no "ar reason: $(cat /tmp/notified)"
 [ "$(ls -1d $N/20??-??-?? | wc -l)" -ge 3 ] && [ -d $N/2026-01-05 ] && ok "older copies untouched after a failure" || no "kept after failure"
 
 echo "jc-offsite:"
