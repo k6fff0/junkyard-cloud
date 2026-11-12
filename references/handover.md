@@ -24,7 +24,8 @@ Write it in the owner's language, for someone who does not remember any of this:
   - a broken service: stop it, restore its files from `nightly/<date>/files`, load its dump, start it
   - a deleted file: `restic restore` from the local or off-site repository
   - a dead system disk: new disk, Ubuntu live USB, restic restore of the `system` snapshot with the saved layout
-    (`/var/backups/jc-layout`), reinstall the boot loader, reboot; write the exact commands for this machine
+    (`/var/backups/jc-layout`), reinstall the boot loader, reboot, then `docker compose up -d --build` in every
+    `/opt/junkyard/<service>` (the image holds no Docker images); write the exact commands for this machine
   - a dead house: a new machine, Ubuntu, restic with the off-site env and password, restore, start
 - the assistant: its numbers, models, modules, how to re-pair WhatsApp, how to change a key
   (`--update-credentials`), how to turn a module on or off (config, then `install`)

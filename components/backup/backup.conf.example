@@ -5,9 +5,11 @@ KEEP_DAYS=3                               # nightly copies kept
 LANG_CODE=en                              # language of the alerts: en | ar
 # Database containers that must always be dumped: if one is missing, the backup fails and you are told.
 # Any other running Postgres/MySQL/MariaDB container is found and dumped by itself.
-REQUIRED_DBS="n8n-postgres immich_postgres paperless_db"
-# Files that must exist in the copy (a quick sanity check). Empty = no check.
-MUST_HAVE="/opt/junkyard /etc/cloudflared"
+# Start EMPTY and add each one when its service is installed (e.g. n8n-postgres paperless_db immich_postgres):
+# a name listed before its container exists fails every night.
+REQUIRED_DBS=""
+# Files that must exist in the copy (a quick sanity check). Empty = no check. Add /etc/cloudflared after step 3.
+MUST_HAVE="/opt/junkyard"
 # Folders copied every night (with hard links: unchanged files cost nothing)
 FILES="/opt /etc /root /home /usr/local /var/spool/cron /var/lib/jc-ops"
 EXCLUDE="*.log /opt/containerd/"

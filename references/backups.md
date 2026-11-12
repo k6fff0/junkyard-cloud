@@ -20,8 +20,12 @@ sudo install -m 644 $S/jc-backup.cron /etc/cron.d/jc-backup
 Always `install -m 755` (or `chmod 755` after a `mv`): a script that lost its execute bit makes cron skip it
 silently, and nobody is told (it happened, see `lessons.md`).
 
-Edit `/etc/junkyard/backup.conf`: `REQUIRED_DBS` = the database containers that exist now (n8n's Postgres,
-Immich, Paperless...), `MUST_HAVE`, `LANG_CODE`, the paths.
+Edit `/etc/junkyard/backup.conf`: `LANG_CODE`, the paths. `REQUIRED_DBS` starts empty (nothing exists yet) and
+`MUST_HAVE` holds only `/opt/junkyard`: **every time you install a service with a database, add its container to
+`REQUIRED_DBS`** (`n8n-postgres`, `paperless_db`, `immich_postgres`...), and add `/etc/cloudflared` after step 3.
+
+Until the assistant exists (step 8) nobody can be told about a failure: `jc-notify` then writes it to
+`/var/log/jc-notify.log`. Read that file at step 8 and at the final check.
 
 ## restic repositories
 
@@ -30,6 +34,11 @@ Two repositories, one password, generated and saved in the secrets file and the 
 
 ```
 sudo install -d -m 700 /root/.restic
+sudo python3 -c 'import secrets; print(secrets.token_urlsafe(32))' | sudo tee /root/.restic/password >/dev/null
+sudo python3 - <<'EOF'      # the same password into the secrets file (the handover lists it for the owner)
+import json; p = "/etc/junkyard/secrets.json"; s = json.load(open(p))
+s["restic_password"] = open("/root/.restic/password").read().strip(); json.dump(s, open(p, "w"), indent=1)
+EOF
 # local (system disk image)
 printf 'export RESTIC_REPOSITORY=/mnt/storage/backups/restic-local\nexport RESTIC_PASSWORD_FILE=/root/.restic/password\n' \
   | sudo tee /root/.restic/local.env >/dev/null
@@ -48,7 +57,10 @@ Big replaceable things never go off-site: downloads, media, caches, thumbnails.
    database, the SQLite files, `/opt/junkyard` under `files/`.
 2. Restore test of the nightly copy: load one dump into a throwaway container and count rows:
    `docker run --rm -d --name rt -e POSTGRES_PASSWORD=x postgres:16 ... ; zcat <dump> | docker exec -i rt psql -U postgres`.
-3. `sudo FORCE=1 jc-snapshot` → `snapshot.json` OK; `restic snapshots --tag system` shows one.
+3. `sudo FORCE=1 jc-snapshot` → `snapshot.json` OK; `restic snapshots --tag system` shows one. It leaves out
+   Docker's images and container layers (they come back with `docker compose up -d --build` in each
+   `/opt/junkyard/<service>` after a restore; named volumes are in the image) and every swap file, and runs at the
+   lowest CPU and disk priority. Expect roughly the system disk's use minus `docker system df`.
 4. `sudo FORCE_CHECK=1 jc-offsite` → `offsite.json` OK; restore one small file from R2 and compare it.
 5. Break it on purpose once: stop a required database, run `jc-backup`, check the owner got the alert, start it again.
 6. The full restore of a dead system disk is written in the handover (`handover.md`, section restore); walk

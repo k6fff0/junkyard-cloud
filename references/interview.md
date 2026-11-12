@@ -20,13 +20,22 @@ Write down: CPU count, RAM, the system disk and its free space, a second disk (s
 not), the LAN address and gateway, and anything already running. **Never format or mount a disk that has data
 on it without the owner's explicit yes** (see `base-os.md`, the data disk).
 
-What the hardware can carry:
+What the hardware can carry (measured on a test build, idle; peaks are higher, and swap is always added):
 
 | RAM | Comfortable with |
 |---|---|
 | 4 GB | the base, the assistant (no archive), Vaultwarden, file browser |
 | 8 GB | add the archive (Paperless + Stirling), links, downloads |
 | 16 GB | everything, including photos with face and object search and media transcoding |
+
+Memory of the big ones: Paperless (with its workers) ~1 GB, Stirling-PDF ~0.7 GB, n8n ~0.5 GB, WhatsApp (WAHA)
+~0.3 GB, link library ~0.3 GB plus a browser while it reads a page, Immich 2-4 GB. If the owner picks more than
+the machine carries, **say so before installing** and offer fewer services or a lighter set; a build of the 8 GB
+set on 4.8 GB fell over (the assistant stopped answering) until swap was added.
+
+System disk: Docker images alone are ~25 GB for the 8 GB set (Paperless 3.6, Stirling 3.6, WAHA 3.2, Gotenberg
+2.5, link library 3.6, n8n 1.8...), plus build caches. **64 GB is the minimum for the system disk**; 40 GB was
+85% full after the test build.
 
 ## 2. Ask the owner (in their language, a few questions at a time)
 
@@ -52,20 +61,27 @@ Do not ask about ports, images, databases or networks: those are yours.
 
 Generate on the server, never in chat:
 
+Everything here is root's (the files are mode 600), so the whole block runs as root:
+
 ```
+sudo bash -s <<'SH'
 install -d -m 700 /etc/junkyard
 python3 - <<'PY'
-import json, os, secrets
+import json, os, secrets, string
 p = "/etc/junkyard/secrets.json"
 s = json.load(open(p)) if os.path.exists(p) else {}
 for k in ("assistant_db_password", "waha_key", "notify_secret", "mail_secret", "filebridge_key", "downloads_key",
-          "webtool_key", "voice_stream_secret", "n8n_encryption_key", "n8n_owner_password"):
+          "webtool_key", "voice_stream_secret", "n8n_encryption_key"):
     s.setdefault(k, secrets.token_hex(24))
+# n8n wants upper- and lower-case letters and a digit in its owner password
+abc = string.ascii_letters + string.digits
+s.setdefault("n8n_owner_password", "Jc7" + "".join(secrets.choice(abc) for _ in range(29)))
 fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
 json.dump(s, os.fdopen(fd, "w"), indent=1)
 PY
-printf '%s' "$(python3 -c 'import json;print(json.load(open("/etc/junkyard/secrets.json"))["notify_secret"])')" \
+python3 -c 'import json;print(json.load(open("/etc/junkyard/secrets.json"))["notify_secret"], end="")' \
   > /etc/junkyard/notify-secret && chmod 600 /etc/junkyard/notify-secret
+SH
 ```
 
 Keys the owner brings (OpenAI, Telegram bot token, Twilio, mailbox app passwords, Cloudflare API token) are

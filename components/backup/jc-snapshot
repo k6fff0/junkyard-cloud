@@ -47,8 +47,15 @@ DUMPS=$(ls -1d "$BACKUP_ROOT"/nightly/20??-??-??/databases 2>/dev/null | tail -1
 mkdir -p /var/backups/jc-dbdumps && chmod 700 /var/backups/jc-dbdumps
 [ -n "$DUMPS" ] && rsync -a --delete "$DUMPS"/ /var/backups/jc-dbdumps/
 FAIL=""
-restic backup --tag system --host "$(hostname)" --one-file-system \
-  --exclude /swap.img --exclude /var/cache/restic --exclude /lost+found --exclude /tmp --exclude /var/tmp \
+# Left out: every active swap file (any name), and Docker's images and container layers (tens of GB, pulled or
+# built again from the pinned versions after a restore; named volumes are kept). Run gently: it reads the whole
+# disk, and at full speed the assistant stopped answering while it ran.
+SKIP=(--exclude /swap.img --exclude /var/cache/restic --exclude /lost+found --exclude /tmp --exclude /var/tmp
+      --exclude /var/lib/containerd --exclude /var/lib/docker/overlay2 --exclude /var/lib/docker/image
+      --exclude /var/lib/docker/containers --exclude /var/lib/docker/buildkit --exclude /var/lib/docker/rootfs
+      --exclude /var/lib/docker/tmp)
+while read -r f; do [ -n "$f" ] && SKIP+=(--exclude "$f"); done < <(swapon --show=NAME,TYPE --noheadings 2>/dev/null | awk '$2=="file"{print $1}')
+nice -n 19 ionice -c 3 restic backup --tag system --host "$(hostname)" --one-file-system "${SKIP[@]}" \
   / /boot /boot/efi >> "$LOG" 2>&1
 rc=$?; [ $rc -eq 0 ] || [ $rc -eq 3 ] || FAIL="system rc=$rc"
 # 3) keep one snapshot only, and really free the old data
