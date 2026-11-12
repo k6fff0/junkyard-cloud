@@ -21,15 +21,19 @@ below and acts only through fixed tools. Read this whole file before starting.
 
 1. Copy `templates/compose/assistant` to `/opt/junkyard/assistant`, fill `.env` (secrets from the secrets file;
    `N8N_ENCRYPTION_KEY` never changes once set: losing it makes every stored credential unreadable).
-2. `docker compose build && docker compose up -d`. The Postgres init script creates the `assistant` database and
-   user; then load the schema: `docker compose exec -T postgres psql -U assistant -d assistant < /opt/junkyard/src/workflows/schema.sql`.
+2. The folders first, owned by the users the containers run as (made by Docker they belong to root, and n8n
+   stops in a loop with `EACCES ... /home/node/.n8n/config`):
+   `sudo install -d -o 1000 -g 1000 n8n && sudo install -d -o 10002 -g 10002 filebridge`.
+   Then `docker compose build && docker compose up -d`. The Postgres init script creates the `assistant` database
+   and user; then load the schema: `docker compose exec -T postgres psql -U assistant -d assistant < /opt/junkyard/src/workflows/schema.sql`.
+   Leave `PAPERLESS_TOKEN` in `filebridge.env` as it is: the installer writes it (section 6).
 3. n8n stays on `127.0.0.1` and `172.17.0.1`. Publish `n8n.DOMAIN` (behind Access) so the owner can look inside.
    With Telegram or Twilio callbacks, `WEBHOOK_URL=https://n8n.DOMAIN/` and an Access **bypass** for
    `n8n.DOMAIN/webhook` only (every webhook checks its own secret header).
-4. Owner account and API key without the web page:
+4. Owner account and API key without the web page (it waits until n8n is really ready, up to 5 minutes):
    ```
    sudo python3 /opt/junkyard/src/installer/jc_n8n.py bootstrap --email <owner email> \
-     --password-file <(jq -r .n8n_owner_password /etc/junkyard/secrets.json) --out /etc/junkyard/n8n-api-key
+     --secrets /etc/junkyard/secrets.json --out /etc/junkyard/n8n-api-key
    ```
    Give the owner the n8n login (email + `n8n_owner_password`) for their password manager.
 
@@ -39,8 +43,11 @@ Explain to the owner first: this is an unofficial WhatsApp link. Use a **second 
 phone that stays on), never their main one; the assistant writes only to them, and replies only to them.
 
 1. WAHA starts with `WHATSAPP_DEFAULT_ENGINE=GOWS` and the API key from the secrets file.
-2. Create the session with the webhook to n8n (check the current API at waha.devlike.pro before calling):
-   `POST http://127.0.0.1:3000/api/sessions` with `{"name":"default","config":{"webhooks":[{"url":"http://n8n:5678/webhook/whatsapp-in","events":["message"],"customHeaders":[{"name":"X-Notify-Secret","value":"<notify_secret>"}]}]}}`.
+2. Create the session with the webhook to n8n (check the current API at waha.devlike.pro before calling), with
+   header `X-Api-Key: <waha_key>`: `POST http://127.0.0.1:3000/api/sessions` with
+   `{"name":"default","start":true,"config":{"webhooks":[{"url":"http://n8n:5678/webhook/whatsapp-in","events":["message"],"customHeaders":[{"name":"X-Notify-Secret","value":"<notify_secret>"}]}]}}`.
+   Without `"start":true` the session is made STOPPED and the next step answers 404; then
+   `POST /api/sessions/default/start`. `GET /api/sessions/default` must say `SCAN_QR_CODE` before pairing.
 3. Pair by code: `POST /api/default/auth/request-code` with the assistant number → an 8-character code. The owner,
    on the assistant phone: WhatsApp → Linked devices → Link a device → Link with phone number → the code.
 4. `GET /api/sessions/default` → `WORKING`. If it ever drops (the phone was off for weeks), pair again the same way.
@@ -98,7 +105,22 @@ sudo python3 installer/jc_n8n.py status  --config /etc/junkyard/config.json
 
 It creates the credentials, the archive setup, every workflow of the chosen modules in the right order, and
 turns them on. Safe to run again after changing the config (a turned-off module's workflows are turned off).
-Changing a key: edit the secrets file and add `--update-credentials`.
+With the archive it also writes the assistant's archive token into `filebridge.env` and recreates the bridge.
+Check: `docker exec filebridge python -c "import urllib.request;print(urllib.request.urlopen('http://127.0.0.1:8790/health').read())"`
+must show `"archive": true`.
+
+Changing a key: edit the secrets file and run `install --update-credentials` (n8n's credentials and the archive's
+webhook). Some keys live in more places: change them there too and recreate what uses them
+(`docker compose up -d` in that folder):
+
+| Key | Also in |
+|---|---|
+| `notify_secret` | `/etc/junkyard/notify-secret`, `downloads/.env` (`NOTIFY_SECRET`), the WAHA session webhook header (`PUT /api/sessions/default`), Uptime Kuma's webhook notification header |
+| `mail_secret` | `mailwatch/.env` (`MAIL_SECRET`) |
+| `filebridge_key`, `waha_key` | `assistant/filebridge.env`, `assistant/.env` |
+| `downloads_key` | `downloads/.env` (`BRIDGE_KEY`) |
+| `webtool_key` | `webtool/.env` |
+| `openai_api_key` | `assistant/filebridge.env`, `karakeep/.env`, `voice/.env` |
 
 ## 7. Models and cost
 

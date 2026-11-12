@@ -1,4 +1,5 @@
-# One entry per installed service. href = the public address; siteMonitor = the internal one (references/network.md).
+# One entry per installed service. href = the public address. siteMonitor (the green dot) only for services
+# published on 172.17.0.1 (references/network.md); the rest are watched by Uptime Kuma (references/monitoring.md).
 - Apps:
     - Assistant (n8n):
         href: https://n8n.example.com
@@ -6,18 +7,21 @@
         icon: n8n.png
     - Photos:
         href: https://photos.example.com
-        siteMonitor: http://172.17.0.1:2283
-        icon: immich.png
+        icon: immich.png                 # 127.0.0.1 only: no dot, Uptime Kuma watches it
     - Documents:
         href: https://docs.example.com
         siteMonitor: http://172.17.0.1:8010
         icon: paperless-ngx.png
+    - Monitoring:
+        href: https://uptime.example.com
+        icon: uptime-kuma.png
+        description: every service, with alerts in chat
 - Backups:
     - Nightly:
         icon: mdi-backup-restore
         widget:
           type: customapi
-          url: http://172.17.0.1:8091/nightly.json
+          url: http://homepage-status:8080/nightly.json
           refreshInterval: 300000
           mappings:
             - field: status
@@ -31,7 +35,7 @@
         icon: mdi-harddisk
         widget:
           type: customapi
-          url: http://172.17.0.1:8091/snapshot.json
+          url: http://homepage-status:8080/snapshot.json
           refreshInterval: 300000
           mappings:
             - field: status
@@ -45,7 +49,7 @@
         icon: mdi-cloud-upload
         widget:
           type: customapi
-          url: http://172.17.0.1:8091/offsite.json
+          url: http://homepage-status:8080/offsite.json
           refreshInterval: 300000
           mappings:
             - field: status

@@ -44,7 +44,7 @@ services:
       PAPERLESS_TIKA_GOTENBERG_ENDPOINT: http://gotenberg:3000
       PAPERLESS_TIKA_ENDPOINT: http://tika:9998
       PAPERLESS_URL: https://docs.${DOMAIN}
-      PAPERLESS_ALLOWED_HOSTS: docs.${DOMAIN},localhost,127.0.0.1,paperless
+      PAPERLESS_ALLOWED_HOSTS: docs.${DOMAIN},localhost,127.0.0.1,paperless,172.17.0.1   # 172.17.0.1: the dashboard dot
       PAPERLESS_TIME_ZONE: ${TZ}
       PAPERLESS_DATE_ORDER: ${DATE_ORDER}
       PAPERLESS_OCR_LANGUAGES: ${OCR_INSTALL}

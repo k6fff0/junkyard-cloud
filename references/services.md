@@ -6,6 +6,20 @@ it with `docker compose up -d`, add its route and Access destination (`cloudflar
 dashboard entry (`monitoring.md`), add any new database container to `REQUIRED_DBS` in the backup config, and
 run its check. One service at a time; the owner tries it before the next.
 
+Container names (for `restartable`, `REQUIRED_DBS`, monitors and `docker logs`); databases in bold:
+
+| Service | Containers |
+|---|---|
+| assistant | n8n, **n8n-postgres**, waha, filebridge |
+| photos | immich_server, immich_machine_learning, immich_redis, **immich_postgres** |
+| passwords | vaultwarden (SQLite, copied nightly) |
+| documents | paperless, **paperless_db**, paperless_broker, paperless_gotenberg, paperless_tika; stirling-pdf |
+| links | karakeep-web-1, karakeep-chrome-1, karakeep-meilisearch-1 |
+| downloads, media | dl-aria2, dl-web, dl-bridge; jellyfin |
+| the rest | uptime-kuma, homepage, homepage-status, filebrowser, homeassistant, webtool, webtool-searxng, mailwatch, voice-bridge |
+
+`restartable` (what the owner may restart from chat) never holds n8n or a database.
+
 ## Photos: Immich (`immich`)
 
 - `photos.DOMAIN` → `127.0.0.1:2283`, behind Access; the phone app needs the service token headers.
@@ -18,6 +32,20 @@ run its check. One service at a time; the owner tries it before the next.
 
 - `password.DOMAIN` → `127.0.0.1:8222`, **not** behind Access (the Bitwarden apps cannot pass it): signups
   off, the admin page off or behind its own Access app on `/admin`, a country rule, and the owner turns on 2FA.
+- Signups are **never** opened, not even for a minute: the site is public, and anyone could register. Only the
+  owner's email is invited, before the route exists (with no mail server, the invited address may register
+  and every other address is refused):
+  ```
+  cd /opt/junkyard/vaultwarden
+  T=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')
+  sed -i "s|^ADMIN_TOKEN=.*|ADMIN_TOKEN=$T|" .env && docker compose up -d && sleep 5
+  curl -s -o /dev/null -c /tmp/vw.jar -d "token=$T" http://127.0.0.1:8222/admin
+  curl -s -o /dev/null -w '%{http_code}
+' -b /tmp/vw.jar -H 'Content-Type: application/json' \
+    -d '{"email":"<owner email>"}' http://127.0.0.1:8222/admin/invite          # 200
+  sed -i 's|^ADMIN_TOKEN=.*|ADMIN_TOKEN=|' .env && docker compose up -d; rm -f /tmp/vw.jar; unset T
+  ```
+  Then publish the route; the owner opens `https://password.DOMAIN`, "Create account" with that email.
 - Its SQLite is copied every night; ask the owner to write the Recovery Code on paper.
 - Check: log in from the Bitwarden phone app (server URL = `https://password.DOMAIN`), add an item, see it on the web.
 
@@ -61,8 +89,17 @@ run its check. One service at a time; the owner tries it before the next.
 
 ## File browser (`filebrowser`)
 
-- `files.DOMAIN` → `127.0.0.1:8080`, behind Access. Runs as a normal user, sees `/mnt/storage` only (read and write
+- `files.DOMAIN` → `127.0.0.1:8080`, behind Access. Runs as a normal user, sees `FILES_ROOT` only (read and write
   to the folders the owner chooses; never `/` or `/etc`).
+- Before the first start, its folders must belong to that user (`PUID`, 1000 by default), or it stops at once:
+  `sudo install -d -o 1000 -g 1000 database config /mnt/storage/share` (the last one = `FILES_ROOT`).
+- The first start makes the `admin` user with a random password that appears **only** in the log. Keep it in the
+  secrets file without printing it, and give it to the owner for their password manager:
+  ```
+  sudo docker logs filebrowser 2>&1 | sed -n 's/.*randomly generated password: *//p' | head -1 | sudo python3 -c '
+  import json, sys; p = "/etc/junkyard/secrets.json"; s = json.load(open(p))
+  s["filebrowser_admin_password"] = sys.stdin.read().strip(); json.dump(s, open(p, "w"), indent=1)'
+  ```
 
 ## Staging for their projects (`staging`)
 

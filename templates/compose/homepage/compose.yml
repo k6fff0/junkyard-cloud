@@ -1,5 +1,6 @@
 # The dashboard. home.DOMAIN -> 127.0.0.1:3001 behind Access. "status" serves the backup status JSON files to the
-# dashboard's cards (read only, numbers and dates, never names or secrets).
+# dashboard's cards (read only, numbers and dates, never names or secrets), at http://homepage-status:8080 on
+# this compose's own network; it publishes no port (from the same network a 172.17.0.1 port is never reached).
 name: homepage
 services:
   homepage:
@@ -17,8 +18,6 @@ services:
     image: nginxinc/nginx-unprivileged:1.27-alpine
     container_name: homepage-status
     restart: unless-stopped
-    ports:
-      - "172.17.0.1:8091:8080"
     volumes:
       - ${STATUS_DIR}:/usr/share/nginx/html:ro
     read_only: true

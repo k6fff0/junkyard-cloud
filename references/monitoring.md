@@ -19,12 +19,14 @@ Check: stop a test container, see the message arrive, start it, see the "back" m
 
 One page with every service, a status dot for each, and the backup cards. Behind Access at `home.DOMAIN`.
 
-- `services.yaml`: one entry per installed service, `href` = the public URL, `siteMonitor` = the internal
-  address from `network.md` (`http://172.17.0.1:<port>`; Homepage runs on the default bridge and reaches the
-  `docker0` address).
-- Backup cards read the status JSON files through a tiny static server (the compose template mounts
-  `/mnt/storage/backups/status` into nginx on `127.0.0.1:8091` and Homepage's `customapi` widget reads
-  `http://172.17.0.1:8091/<name>.json`, fields `status`, `finished`, `size`, `snapshots`).
+- `services.yaml`: one entry per installed service, `href` = the public URL. A status dot (`siteMonitor`) only
+  for services published on `172.17.0.1` (`network.md`: n8n `5678/healthz`, Paperless `8010`, Karakeep `3010`,
+  Jellyfin `8096`); a container cannot reach the server's `127.0.0.1`, so services published there only get no
+  dot, and Uptime Kuma (which checks everything and alerts in chat) has its own entry on the page.
+- Backup cards read the status JSON files through a tiny static server in the same compose (`homepage-status`,
+  no published port): Homepage's `customapi` widget reads `http://homepage-status:8080/<name>.json`, fields
+  `status`, `finished`, `size`, `snapshots`. (Not `172.17.0.1`: from the container's own network that address
+  goes to the host, where ufw drops it; every card showed an error that way.)
 - `settings.yaml`: title, the owner's language, `layout` with the groups Apps, Backups, Server health.
 - Never put a cards group with numbers inside the Apps group: on phones, Homepage makes a group that holds a
   number widget one column wide, and the whole Apps grid collapses (it happened).

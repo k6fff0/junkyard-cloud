@@ -1,7 +1,9 @@
 #!/bin/sh
 # Puts the AriaNg panel in ./web/ariang (checked by SHA-256) and makes it connect to aria2 by itself on first open.
-# Safe to run again. Needs .env (ARIA2_SECRET).
+# Safe to run again. Needs .env (ARIA2_SECRET, DOWNLOADS_DIR). Run as root (sudo sh setup.sh): aria2 and the bridge
+# run as uid 10001, and their folders must be theirs or they stop at once ("Permission denied").
 set -eu
+[ "$(id -u)" = 0 ] || { echo "run as root: sudo sh setup.sh"; exit 1; }
 cd "$(dirname "$0")"
 VERSION=1.3.15
 SHA256=d2317e441966ad31f1e342cb6a6cc1c51808fb0a10cf6e39cb30b0517b3e7823
@@ -24,5 +26,7 @@ cat > web/ariang/jc-defaults.js <<JS
 })();
 JS
 grep -q jc-defaults.js web/ariang/index.html || sed -i 's|</head>|<script src="jc-defaults.js"></script></head>|' web/ariang/index.html
-mkdir -p data/aria2 data/bridge
-echo "AriaNg $VERSION ready"
+mkdir -p data/aria2 data/bridge "$DOWNLOADS_DIR"
+chown -R 10001:10001 data
+chown 10001:10001 "$DOWNLOADS_DIR"
+echo "AriaNg $VERSION ready, folders owned by uid 10001"

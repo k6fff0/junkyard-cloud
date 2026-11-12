@@ -66,7 +66,7 @@ docker run --rm --network downloads alpine:3.22 wget -q -T 5 -O /dev/null https:
 | 3010 | Karakeep | 127.0.0.1, 172.17.0.1 |
 | 8010 | Paperless | 127.0.0.1, 172.17.0.1 |
 | 8085 | Stirling-PDF | 127.0.0.1 |
-| 8096 | Jellyfin | 127.0.0.1 |
+| 8096 | Jellyfin | 127.0.0.1, 172.17.0.1 (the dashboard dot) |
 | 8102 / 8103 | downloads panel / bridge | 127.0.0.1 / 172.17.0.1 |
 | 8222 | Vaultwarden | 127.0.0.1 |
 | 8765 | voice bridge | 127.0.0.1 |

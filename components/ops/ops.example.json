@@ -2,7 +2,9 @@
   "lang": "en",
   "restartable": ["immich_server", "vaultwarden", "homepage", "waha", "voice-bridge"],
   "disks": {"system": "/", "storage": "/mnt/storage"},
-  "status_files": {"nightly": "/mnt/storage/backups/status/system.json"},
+  "status_files": {"nightly": "/mnt/storage/backups/status/nightly.json",
+                   "snapshot": "/mnt/storage/backups/status/snapshot.json",
+                   "offsite": "/mnt/storage/backups/status/offsite.json"},
   "default_channels": ["whatsapp"],
   "notify_url": "http://127.0.0.1:5678/webhook/notify",
   "notify_secret_file": "/etc/junkyard/notify-secret"
