@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/junkyard-cloud.png" alt="Junkyard Cloud: turn an old PC into your own private cloud, with a personal AI assistant on WhatsApp" width="100%">
+
 # Junkyard Cloud
 
 **Turn an old PC into your own private cloud, with a personal AI assistant on WhatsApp.**
